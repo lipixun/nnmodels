@@ -1,3 +1,8 @@
+# Models and files
+*.bin
+model/
+*.h5
+result
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
