@@ -87,7 +87,7 @@ def runApply(args):
     # Load file
     logger.info("Load input file: %s", args.input)
     df = pd.read_csv(args.input, dtype=np.float32, engine="c") # pylint: disable=no-member
-    X = pl.tranform(df.values[:,:-1])
+    X = pl.transform(df.values[:,1:-1])
     logger.info("Get data X%s", X.shape)
     # Write file
     logger.info("Write hdf5 file: %s", args.output)

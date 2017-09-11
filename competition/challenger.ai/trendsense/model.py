@@ -36,6 +36,7 @@ Path = "model"
 XSize = 88
 L2Beta = 1e-3
 BatchSize = 512
+LR=1e-3
 IsTraining = tftrainer.getIsTrainingVar()
 
 class Model(object):
@@ -50,18 +51,18 @@ class Model(object):
         self.W = tf.placeholder(shape=(None, ), dtype=tf.float32, name="w")
         # Define layers
         with tf.variable_scope("layer1"):
-            inp = tf.cond(IsTraining, true_fn=lambda: tf.nn.dropout(self.X, 0.8), false_fn=lambda: self.X)
+            inp = tf.cond(IsTraining, true_fn=lambda: tf.nn.dropout(self.X, 0.5), false_fn=lambda: self.X)
             self.layer1W = tf.get_variable("W", shape=(XSize, 1000), initializer=tf.truncated_normal_initializer())
             self.layer1B = tf.get_variable("b", shape=(1000,))
-            self.layer1 = tf.nn.xw_plus_b(inp, self.layer1W, self.layer1B)
+            self.layer1 = tf.nn.tanh(tf.nn.xw_plus_b(inp, self.layer1W, self.layer1B))
         with tf.variable_scope("layer2"):
-            inp = tf.cond(IsTraining, true_fn=lambda: tf.nn.dropout(self.layer1, 0.8), false_fn=lambda: self.layer1)
+            inp = tf.cond(IsTraining, true_fn=lambda: tf.nn.dropout(self.layer1, 0.5), false_fn=lambda: self.layer1)
             self.layer2W = tf.get_variable("W", shape=(1000, 200), initializer=tf.truncated_normal_initializer())
             self.layer2B = tf.get_variable("b", shape=(200,))
-            self.layer2 = tf.nn.xw_plus_b(inp, self.layer2W, self.layer2B)
+            self.layer2 = tf.nn.tanh(tf.nn.xw_plus_b(inp, self.layer2W, self.layer2B))
         # Output
         with tf.variable_scope("output"):
-            inp = tf.cond(IsTraining, true_fn=lambda: tf.nn.dropout(self.layer2, 0.8), false_fn=lambda: self.layer2)
+            inp = tf.cond(IsTraining, true_fn=lambda: tf.nn.dropout(self.layer2, 0.5), false_fn=lambda: self.layer2)
             self.outputW = tf.get_variable("W", shape=(200, 1), initializer=tf.truncated_normal_initializer())
             self.outputB = tf.get_variable("b", shape=(1,))
             self.outputLogits = tf.nn.xw_plus_b(inp, self.outputW, self.outputB)
@@ -74,7 +75,7 @@ class Model(object):
             name="default",
             losses={"default": self.loss},
             metrics={"logloss": tftrainer.metric.TFStreamingMetric(tf.contrib.metrics.streaming_mean, "logloss", self.logitLoss)},
-            optimizers=[ tfutils.optimizers.clipGradientByGlobalNorm(tf.train.AdamOptimizer(), self.lossWithL2, 5.0) ],
+            optimizers=[tfutils.optimizers.clipGradientByGlobalNorm(tf.train.AdamOptimizer(learning_rate=tf.train.exponential_decay(LR, tftrainer.getGlobalStepVar(), 2000, 0.9)), self.lossWithL2, 5.0)],
         )
 
     def train(self, inp):
