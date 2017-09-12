@@ -52,12 +52,12 @@ class Model(object):
         # Define layers
         with tf.variable_scope("layer1"):
             inp = tf.cond(IsTraining, true_fn=lambda: tf.nn.dropout(self.X, 0.5), false_fn=lambda: self.X)
-            self.layer1W = tf.get_variable("W", shape=(XSize, 1000), initializer=tf.truncated_normal_initializer())
-            self.layer1B = tf.get_variable("b", shape=(1000,))
+            self.layer1W = tf.get_variable("W", shape=(XSize, 2000), initializer=tf.truncated_normal_initializer())
+            self.layer1B = tf.get_variable("b", shape=(2000,))
             self.layer1 = tf.nn.tanh(tf.nn.xw_plus_b(inp, self.layer1W, self.layer1B))
         with tf.variable_scope("layer2"):
             inp = tf.cond(IsTraining, true_fn=lambda: tf.nn.dropout(self.layer1, 0.5), false_fn=lambda: self.layer1)
-            self.layer2W = tf.get_variable("W", shape=(1000, 200), initializer=tf.truncated_normal_initializer())
+            self.layer2W = tf.get_variable("W", shape=(2000, 200), initializer=tf.truncated_normal_initializer())
             self.layer2B = tf.get_variable("b", shape=(200,))
             self.layer2 = tf.nn.tanh(tf.nn.xw_plus_b(inp, self.layer2W, self.layer2B))
         # Output
@@ -92,7 +92,6 @@ class Model(object):
         logger.info("Train the model")
         trainer = tftrainer.Trainer(Path)
         trainer.train(trainOps=self.trainOp, validateOps=self.trainOp, trainFeeder=trainFeeder, validateFeeder=testFeeder, testFeeder=testFeeder, maxEpoch=100)
-        #trainer.train(trainOps=self.trainOp, validateOps=self.trainOp, trainFeeder=trainFeeder, validateFeeder=trainFeeder, maxEpoch=50)
 
     def predict(self, inp, out):
         """Predict by this model
@@ -103,7 +102,7 @@ class Model(object):
         # Load input data
         logger.info("Load input data: %s", inp)
         h5f = h5py.File(inp, "r")
-        feeder = tftrainer.HDF5Feeder(h5f, {self.X: "x"}, BatchSize, shuffle=True, queue=tftrainer.SimpleFeedQueue(1000))
+        feeder = tftrainer.HDF5Feeder(h5f, {self.X: "x"}, BatchSize, queue=tftrainer.SimpleFeedQueue(1000))
         # Predict
         logger.info("Predict")
         outputs = trainer.run(outs=self.output, feeder=feeder)
