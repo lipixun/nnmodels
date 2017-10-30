@@ -1,3 +1,4 @@
-# The models I am learning
+# The learning models
 
-* rf Reinforcement Learning
+* tf - Tensorflow
+* rf - Reinforcement Learning
