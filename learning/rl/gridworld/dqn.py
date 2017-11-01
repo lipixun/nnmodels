@@ -69,7 +69,8 @@ class QNetwork(object):
     def update(self, states, rewards, actions, session):
         """Update the model
         """
-        session.run(self.updateop, feed_dict={self.state: states, self.targetRewards: rewards, self.actualActions: actions})
+        _, loss = session.run([self.updateop, self.loss], feed_dict={self.state: states, self.targetRewards: rewards, self.actualActions: actions})
+        return loss
 
 class ExperienceBuffer(object):
     """The experience buffer
@@ -123,7 +124,7 @@ if __name__ == "__main__":
     totalEpisodes   = 10000
     preTrainSteps   = 10000
     maxEpochLength  = 50
-    updateFreq      = 4
+    updateFreq      = 500
     batchSize       = 128
     discountFactor  = 0.99
 
@@ -169,27 +170,28 @@ if __name__ == "__main__":
                     action = action[0]
                 # Execute the environment
                 newState, reward, terminated = env.step(action)
-                expBuffer.add(np.array([state, newState, action, reward, terminated]).reshape(1, -1))
+                expBuffer.add(np.array([state, newState, action, reward, 1 if terminated else 0]).reshape(1, -1))
                 gStep += 1
                 if e > eEnd:
                     e -= eStepReduceValue
                 # Replace & update
                 totalReward += reward
                 state = newState
-                # Update network
-                if gStep > preTrainSteps and gStep % updateFreq == 0:
-                    exps = expBuffer.sample(batchSize)
-                    # Calculate the target rewards
-                    policyPreds, valueOuts = policyGraph.predict(np.stack(exps[:, 1]).reshape(-1, ImageSize * ImageSize * ImageDepth), session)
-                    #_, valueOuts = valueGraph.predict(np.stack(exps[:, 1]).reshape(-1, ImageSize * ImageSize * ImageDepth), session)
-                    terminateFactor = -(exps[:, 4] - 1)
-                    finalOuts = valueOuts[range(batchSize), policyPreds]   # final outs = The output reward of value network of each action that is predicted by policy network
-                    targetRewards = exps[:, 3] + (finalOuts * discountFactor * terminateFactor)
-                    # Update policy & value network
-                    policyGraph.update(np.stack(exps[:, 0]).reshape(-1, ImageSize * ImageSize * ImageDepth), targetRewards, exps[:, 2], session)
-                    #session.run(valueGraphUpdateOp)
                 if terminated:
                     break
+            # Update network
+            if gStep > preTrainSteps and gStep % updateFreq == 0:
+                exps = expBuffer.sample(batchSize)
+                # Calculate the target rewards
+                policyPreds, valueOuts = policyGraph.predict(np.stack(exps[:, 1]).reshape(-1, ImageSize * ImageSize * ImageDepth), session)
+                #_, valueOuts = valueGraph.predict(np.stack(exps[:, 1]).reshape(-1, ImageSize * ImageSize * ImageDepth), session)
+                terminateFactor = -(exps[:, 4] - 1)
+                finalOuts = valueOuts[range(batchSize), policyPreds]   # final outs = The output reward of value network of each action that is predicted by policy network
+                targetRewards = exps[:, 3] + (finalOuts * discountFactor * terminateFactor)
+                # Update policy & value network
+                loss = policyGraph.update(np.stack(exps[:, 0]).reshape(-1, ImageSize * ImageSize * ImageDepth), targetRewards, exps[:, 2], session)
+                print "Train loss:", loss
+                #session.run(valueGraphUpdateOp)
             stepRecords.append(epoch + 1)
             rewardRecords.append(totalReward)
             if episode % 10 == 0:
