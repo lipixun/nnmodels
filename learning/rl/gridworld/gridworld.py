@@ -9,7 +9,6 @@ import itertools
 
 import numpy as np
 import scipy.misc
-import matplotlib.pyplot as plt
 
 ImageSize = 84
 ImageDepth = 3
@@ -36,7 +35,6 @@ class GameEnv(object):
         self.objects = []
         self.partial = partial
         state = self.reset()
-        plt.imshow(state, interpolation="nearest")
 
     def reset(self):
         self.objects = []
