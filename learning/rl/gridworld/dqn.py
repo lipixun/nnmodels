@@ -64,7 +64,7 @@ class QNetwork(object):
     def predict(self, states, session):
         """Predict
         """
-        return session.run([ self.prediction, self.output ], feed_dict={self.state: states})
+        return session.run([self.prediction, self.output], feed_dict={self.state: states})
 
     def update(self, states, rewards, actions, session):
         """Update the model
@@ -180,21 +180,17 @@ if __name__ == "__main__":
                 if gStep > preTrainSteps and gStep % updateFreq == 0:
                     exps = expBuffer.sample(batchSize)
                     # Calculate the target rewards
-                    policyPreds, _ = policyGraph.predict(np.stack(exps[:, 1]).reshape(-1, ImageSize * ImageSize * ImageDepth), session)
-                    _, valueOuts = valueGraph.predict(np.stack(exps[:, 1]).reshape(-1, ImageSize * ImageSize * ImageDepth), session)
+                    policyPreds, valueOuts = policyGraph.predict(np.stack(exps[:, 1]).reshape(-1, ImageSize * ImageSize * ImageDepth), session)
+                    #_, valueOuts = valueGraph.predict(np.stack(exps[:, 1]).reshape(-1, ImageSize * ImageSize * ImageDepth), session)
                     terminateFactor = -(exps[:, 4] - 1)
                     finalOuts = valueOuts[range(batchSize), policyPreds]   # final outs = The output reward of value network of each action that is predicted by policy network
                     targetRewards = exps[:, 3] + (finalOuts * discountFactor * terminateFactor)
                     # Update policy & value network
                     policyGraph.update(np.stack(exps[:, 0]).reshape(-1, ImageSize * ImageSize * ImageDepth), targetRewards, exps[:, 2], session)
-                    session.run(valueGraphUpdateOp)
+                    #session.run(valueGraphUpdateOp)
                 if terminated:
                     break
-            stepRecords.append(epoch)
+            stepRecords.append(epoch + 1)
             rewardRecords.append(totalReward)
             if episode % 10 == 0:
                 print "Episode [%d] Global Step [%d] E[%.4f] Mean Step [%.4f] Mean Reward [%.4f]" % (episode, gStep, e, np.mean(stepRecords[-10:]), np.mean(rewardRecords[-10:]))
-
-
-
-
