@@ -125,11 +125,11 @@ if __name__ == "__main__":
     totalEpisodes   = 10000000
     preTrainSteps   = 50000
     maxEpochLength  = 100
-    updateFreq      = 500
-    batchSize       = 128
+    updateFreq      = 5
+    batchSize       = 256
     discountFactor  = 0.99
 
-    eStart, eEnd, eReduceStepNum = 1.0, 0.1, 100000
+    eStart, eEnd, eReduceStepNum = 1.0, 0.1, 1000000
 
     env = GameEnv(False, 5)
     expBuffer = ExperienceBuffer(size=100000)
