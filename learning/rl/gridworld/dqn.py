@@ -142,11 +142,11 @@ if __name__ == "__main__":
     with tf.variable_scope("policy") as scope:
         policyGraph = QNetwork(env.actions)
         policyGraphVars = tf.contrib.framework.get_variables(scope, collection=tf.GraphKeys.GLOBAL_VARIABLES)
-    #with tf.variable_scope("value") as scope:
-    #    valueGraph = QNetwork(env.actions)
-    #    valueGraphVars = tf.contrib.framework.get_variables(scope, collection=tf.GraphKeys.GLOBAL_VARIABLES)
+    with tf.variable_scope("value") as scope:
+        valueGraph = QNetwork(env.actions)
+        valueGraphVars = tf.contrib.framework.get_variables(scope, collection=tf.GraphKeys.GLOBAL_VARIABLES)
         # Get the update op of value graph
-    #    valueGraphUpdateOp = buildValueGraphUpdateOp(policyGraphVars, valueGraphVars, 1e-3)
+        valueGraphUpdateOp = buildValueGraphUpdateOp(policyGraphVars, valueGraphVars, 1e-3)
 
     #
     # Run training
@@ -188,15 +188,15 @@ if __name__ == "__main__":
             if gStep > preTrainSteps and gStep % updateFreq == 0:
                 exps = expBuffer.sample(batchSize)
                 # Calculate the target rewards
-                policyPreds, valueOuts = policyGraph.predict(np.stack(exps[:, 1]).reshape(-1, ImageSize * ImageSize * ImageDepth), session)
-                #_, valueOuts = valueGraph.predict(np.stack(exps[:, 1]).reshape(-1, ImageSize * ImageSize * ImageDepth), session)
+                policyPreds, _ = policyGraph.predict(np.stack(exps[:, 1]).reshape(-1, ImageSize * ImageSize * ImageDepth), session)
+                _, valueOuts = valueGraph.predict(np.stack(exps[:, 1]).reshape(-1, ImageSize * ImageSize * ImageDepth), session)
                 terminateFactor = -(exps[:, 4] - 1)
                 finalOuts = valueOuts[range(batchSize), policyPreds]   # final outs = The output reward of value network of each action that is predicted by policy network
                 targetRewards = exps[:, 3] + (finalOuts * discountFactor * terminateFactor)
                 # Update policy & value network
                 loss = policyGraph.update(np.stack(exps[:, 0]).reshape(-1, ImageSize * ImageSize * ImageDepth), targetRewards, exps[:, 2], session)
+                session.run(valueGraphUpdateOp)
                 print "Train loss:", loss
-                #session.run(valueGraphUpdateOp)
             stepRecords.append(epoch + 1)
             rewardRecords.append(totalReward)
             if episode % 10 == 0:
