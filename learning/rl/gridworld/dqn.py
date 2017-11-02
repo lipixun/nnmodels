@@ -85,10 +85,11 @@ class ExperienceBuffer(object):
     def add(self, experience):
         """Add an experience
         """
+        self.index = (self.index + 1) % self.size
+        # Add to buffer
         if len(self.buffer) < self.size:
             self.buffer.append(experience)
         else:
-            self.index = (self.index + 1) % self.size
             self.buffer[self.index] = experience
 
     def reset(self):
@@ -170,7 +171,7 @@ if __name__ == "__main__":
                     action = action[0]
                 # Execute the environment
                 newState, reward, terminated = env.step(action)
-                expBuffer.add(np.array([state, newState, action, reward, 1 if terminated else 0]).reshape(1, -1))
+                expBuffer.add(np.array([state, newState, action, reward, 1 if terminated or epoch == maxEpochLength - 1 else 0]).reshape(1, -1))    # Force terminated at the end of max epoch length
                 gStep += 1
                 if e > eEnd:
                     e -= eStepReduceValue
@@ -179,9 +180,6 @@ if __name__ == "__main__":
                 state = newState
                 if terminated:
                     break
-            else:
-                # Force add a terminal state
-                pass
             # Update network
             if gStep > preTrainSteps and gStep % updateFreq == 0:
                 exps = expBuffer.sample(batchSize)
