@@ -175,7 +175,7 @@ if __name__ == "__main__":
                     action = action[0]
                 # Execute the environment
                 newState, reward, terminated = env.step(action)
-                expBuffer.add(np.array([state, newState, action, reward, 1 if terminated or epoch == maxEpochLength - 1 else 0]).reshape(1, -1))    # Force terminated at the end of max epoch length
+                expBuffer.add(np.array([state, newState, action, reward, 1 if terminated else 0]).reshape(1, -1))    # Force terminated at the end of max epoch length
                 gStep += 1
                 if e > eEnd:
                     e -= eStepReduceValue
