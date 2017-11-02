@@ -51,7 +51,11 @@ class QNetwork(object):
         # Train method
         self.targetRewards = tf.placeholder(tf.float32, [None])
         self.actualActions = tf.placeholder(tf.int32, [None])
-        self.loss = tf.reduce_mean(tf.square(self.targetRewards - tf.reduce_sum(tf.one_hot(self.actualActions, actionNums) * self.output, axis=1)))
+        # Huber loss
+        actualQValues = tf.reduce_sum(tf.one_hot(self.actualActions, actionNums) * self.output, axis=1)
+        #self.loss = tf.reduce_mean(tf.square(self.targetRewards - actualQValues))
+        error = self.targetRewards - actualQValues
+        self.loss = tf.reduce_mean(tf.where(tf.abs(error) > 1.0, tf.abs(error), tf.square(error)))
         self.updateop = tf.train.AdamOptimizer(learning_rate=1e-3).minimize(self.loss)
 
     def conv2d(self, inp, filters, ksize, strides):
