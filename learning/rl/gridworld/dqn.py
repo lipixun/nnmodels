@@ -129,7 +129,7 @@ if __name__ == "__main__":
     batchSize       = 128
     discountFactor  = 0.99
 
-    eStart, eEnd, eReduceStepNum = 1.0, 0.1, 10000
+    eStart, eEnd, eReduceStepNum = 1.0, 0.1, 100000
 
     env = GameEnv(False, 5)
     expBuffer = ExperienceBuffer(size=100000)
