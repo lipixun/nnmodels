@@ -121,9 +121,9 @@ def buildValueGraphUpdateOp(policyGraphVars, valueGraphVars, r):
 
 if __name__ == "__main__":
 
-    totalEpisodes   = 1000000
-    preTrainSteps   = 10000
-    maxEpochLength  = 50
+    totalEpisodes   = 10000000
+    preTrainSteps   = 50000
+    maxEpochLength  = 100
     updateFreq      = 500
     batchSize       = 128
     discountFactor  = 0.99
@@ -131,7 +131,7 @@ if __name__ == "__main__":
     eStart, eEnd, eReduceStepNum = 1.0, 0.1, 10000
 
     env = GameEnv(False, 5)
-    expBuffer = ExperienceBuffer()
+    expBuffer = ExperienceBuffer(size=100000)
 
     # Create networks
     with tf.variable_scope("policy") as scope:
@@ -179,6 +179,9 @@ if __name__ == "__main__":
                 state = newState
                 if terminated:
                     break
+            else:
+                # Force add a terminal state
+                pass
             # Update network
             if gStep > preTrainSteps and gStep % updateFreq == 0:
                 exps = expBuffer.sample(batchSize)
