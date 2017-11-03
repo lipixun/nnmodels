@@ -127,7 +127,7 @@ def buildValueGraphUpdateOp(policyGraphVars, valueGraphVars, r):
 if __name__ == "__main__":
 
     totalEpisodes   = 10000000
-    preTrainSteps   = 50000
+    preTrainSteps   = 500#00
     maxEpochLength  = 100
     updateFreq      = 5
     batchSize       = 256
@@ -175,7 +175,7 @@ if __name__ == "__main__":
                     action = action[0]
                 # Execute the environment
                 newState, reward, terminated = env.step(action)
-                expBuffer.add(np.array([state, newState, action, reward, 1 if terminated else 0]).reshape(1, -1))    # Force terminated at the end of max epoch length
+                expBuffer.add(np.array([state, newState, action, reward, terminated]).reshape(1, -1))    # Force terminated at the end of max epoch length
                 gStep += 1
                 if e > eEnd:
                     e -= eStepReduceValue
@@ -190,7 +190,7 @@ if __name__ == "__main__":
                 # Calculate the target rewards
                 policyPreds, _ = policyGraph.predict(np.stack(exps[:, 1]).reshape(-1, ImageSize * ImageSize * ImageDepth), session)
                 _, valueOuts = valueGraph.predict(np.stack(exps[:, 1]).reshape(-1, ImageSize * ImageSize * ImageDepth), session)
-                terminateFactor = -(exps[:, 4] - 1)
+                terminateFactor = np.invert(exps[:, 4]).astype(np.float32)    # pylint: disable=no-member
                 finalOuts = valueOuts[range(batchSize), policyPreds]   # final outs = The output reward of value network of each action that is predicted by policy network
                 targetRewards = exps[:, 3] + (finalOuts * discountFactor * terminateFactor)
                 # Update policy & value network
