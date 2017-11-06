@@ -171,7 +171,9 @@ if __name__ == "__main__":
             state = env.reset()
             totalReward = 0.0
             # Run
-            for epoch in xrange(maxEpochLength):
+            epoch = 0
+            while True:
+                epoch += 1
                 # Choose an action
                 if gStep < preTrainSteps or np.random.rand(1) < e: # pylint: disable=no-member
                     action = env.action_space.sample()
@@ -189,6 +191,8 @@ if __name__ == "__main__":
                 state = newState
                 if terminated:
                     break
+            stepRecords.append(epoch + 1)
+            rewardRecords.append(totalReward)
             # Update network
             if gStep > preTrainSteps and gStep % updateFreq == 0:
                 exps = expBuffer.sample(batchSize)
@@ -202,7 +206,5 @@ if __name__ == "__main__":
                 loss = policyGraph.update(np.stack(exps[:, 0]), targetRewards, exps[:, 2], session)
                 session.run(valueGraphUpdateOp)
                 print "Train loss:", loss
-            stepRecords.append(epoch + 1)
-            rewardRecords.append(totalReward)
             if episode % 10 == 0:
                 print "Episode [%d] Global Step [%d] E[%.4f] Mean Step [%.4f] Mean Reward [%.4f]" % (episode, gStep, e, np.mean(stepRecords[-10:]), np.mean(rewardRecords[-10:]))
