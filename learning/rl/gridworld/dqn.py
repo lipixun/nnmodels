@@ -138,7 +138,7 @@ def buildValueGraphUpdateOp(policyGraphVars, valueGraphVars, r):
 if __name__ == "__main__":
 
     totalEpisodes   = 10000000
-    preTrainSteps   = 500#00
+    preTrainSteps   = 50000
     maxEpochLength  = 100
     updateFreq      = 5
     batchSize       = 256
