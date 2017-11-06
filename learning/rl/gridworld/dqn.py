@@ -13,6 +13,7 @@
 import random
 
 import numpy as np
+import tfutils
 import tensorflow as tf
 
 from gridworld import GameEnv, ImageSize, ImageDepth
@@ -32,19 +33,19 @@ class QNetwork(object):
         with tf.variable_scope("cnn-1"):
             cnn1 = self.conv2d(cnn0, 64, [4, 4], [1, 2, 2, 1])
         with tf.variable_scope("cnn-2"):
-            cnn2 = self.conv2d(cnn1, 128, [3, 3], [1, 1, 1, 1])
-        with tf.variable_scope("cnn-3"):
-            cnn3 = self.conv2d(cnn2, 256, [7, 7], [1, 1, 1, 1])
-        cnnOut = tf.reshape(cnn3, [-1, np.prod([d.value for d in cnn3.shape[1:]])])
+            cnn2 = self.conv2d(cnn1, 64, [3, 3], [1, 1, 1, 1])
+        cnnOut = tf.reshape(cnn2, [-1, np.prod([d.value for d in cnn2.shape[1:]])])
         # Duel-QDN
         with tf.variable_scope("value"):
-            W = tf.get_variable("W", [256, 1], tf.float32, tf.random_normal_initializer())
-            b = tf.get_variable("b", [1], tf.float32, tf.zeros_initializer())
-            value = tf.nn.xw_plus_b(cnnOut, W, b)
+            with tf.variable_scope("fc"):
+                fcOut = self.fc(cnnOut, 512, tf.nn.tanh)
+            with tf.variable_scope("out"):
+                value = self.fc(fcOut, 1)
         with tf.variable_scope("advantage"):
-            W = tf.get_variable("W", [256, actionNums], tf.float32, tf.random_normal_initializer())
-            b = tf.get_variable("b", [actionNums], tf.float32, tf.zeros_initializer())
-            advantage = tf.nn.xw_plus_b(cnnOut, W, b)
+            with tf.variable_scope("fc"):
+                fcOut = self.fc(cnnOut, 512, tf.nn.tanh)
+            with tf.variable_scope("out"):
+                advantage = self.fc(fcOut, actionNums)
         # Output
         self.output = value + advantage - tf.reduce_mean(advantage, axis=1, keep_dims=True)
         self.prediction = tf.argmax(self.output, axis=1)
@@ -64,6 +65,16 @@ class QNetwork(object):
         W = tf.get_variable("W", list(ksize) + [inp.shape[-1], filters], tf.float32, tf.random_normal_initializer())
         b = tf.get_variable("b", [filters], tf.float32, tf.zeros_initializer())
         return tf.nn.relu(tf.nn.bias_add(tf.nn.conv2d(inp, W, strides, "VALID"), b))
+
+    def fc(self, inp, size, act=None):
+        """Add a full connected layer
+        """
+        W = tf.get_variable("W", [inp.shape[-1].value, size], tf.float32, tf.random_normal_initializer())
+        b = tf.get_variable("b", [size], tf.float32, tf.zeros_initializer())
+        out = tf.nn.xw_plus_b(inp, W, b)
+        if act:
+            out = act(out)
+        return out
 
     def predict(self, states, session):
         """Predict
@@ -155,10 +166,11 @@ if __name__ == "__main__":
     eStepReduceValue = float(eStart - eEnd) / float(eReduceStepNum)
     gStep = 0
 
-    stepRecords = []
-    rewardRecords = []
+    totalLoss, totalLossCount = 0.0, 0
+    totalSteps, totalStepIndex = [0.0] * 100, -1
+    totalRewards, totalRewardIndex = [0.0] * 100, -1
 
-    with tf.Session() as session:
+    with tf.Session(config=tfutils.session.newConfigProto(0.25)) as session:
         # Init all variables
         session.run(tf.global_variables_initializer())
         for episode in xrange(totalEpisodes):
@@ -184,6 +196,11 @@ if __name__ == "__main__":
                 state = newState
                 if terminated:
                     break
+            # Update
+            totalStepIndex = (totalStepIndex + 1) % 100
+            totalRewardIndex = (totalRewardIndex + 1) % 100
+            totalSteps[totalStepIndex] = epoch + 1 # pylint: disable=undefined-loop-variable
+            totalRewards[totalRewardIndex] = totalReward
             # Update network
             if gStep > preTrainSteps and gStep % updateFreq == 0:
                 exps = expBuffer.sample(batchSize)
@@ -196,8 +213,13 @@ if __name__ == "__main__":
                 # Update policy & value network
                 loss = policyGraph.update(np.stack(exps[:, 0]).reshape(-1, ImageSize * ImageSize * ImageDepth), targetRewards, exps[:, 2], session)
                 session.run(valueGraphUpdateOp)
-                print "Train loss:", loss
-            stepRecords.append(epoch + 1)
-            rewardRecords.append(totalReward)
-            if episode % 10 == 0:
-                print "Episode [%d] Global Step [%d] E[%.4f] Mean Step [%.4f] Mean Reward [%.4f]" % (episode, gStep, e, np.mean(stepRecords[-10:]), np.mean(rewardRecords[-10:]))
+                totalLoss += loss
+                totalLossCount += 1
+            # Show metrics
+            if episode % 100 == 0:
+                loss = 0.0
+                if totalLossCount:
+                    loss = totalLoss / totalLossCount
+                    totalLoss = 0.0
+                    totalLossCount = 0
+                print "Episode [%d] Global Step [%d] E[%.4f] Mean Loss [%f] Mean Step [%.4f] Mean Reward [%.4f]" % (episode, gStep, e, totalLossCount, np.mean(totalSteps), np.mean(totalRewards))
