@@ -202,7 +202,7 @@ if __name__ == "__main__":
             totalSteps[totalStepIndex] = epoch + 1 # pylint: disable=undefined-loop-variable
             totalRewards[totalRewardIndex] = totalReward
             # Update network
-            if gStep > preTrainSteps and gStep % updateFreq == 0:
+            if gStep > preTrainSteps:
                 exps = expBuffer.sample(batchSize)
                 # Calculate the target rewards
                 policyPreds, _ = policyGraph.predict(np.stack(exps[:, 1]).reshape(-1, ImageSize * ImageSize * ImageDepth), session)
@@ -222,4 +222,4 @@ if __name__ == "__main__":
                     loss = totalLoss / totalLossCount
                     totalLoss = 0.0
                     totalLossCount = 0
-                print "Episode [%d] Global Step [%d] E[%.4f] Mean Loss [%f] Mean Step [%.4f] Mean Reward [%.4f]" % (episode, gStep, e, totalLossCount, np.mean(totalSteps), np.mean(totalRewards))
+                print "Episode [%d] Global Step [%d] E[%.4f] Mean Loss [%f] Mean Step [%.4f] Mean Reward [%.4f]" % (episode, gStep, e, loss, np.mean(totalSteps), np.mean(totalRewards))
