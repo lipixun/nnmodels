@@ -222,7 +222,7 @@ class AgentWorker(object):
                 gLossIndex = (gLossIndex + 1) % 100
                 gLosses[gLossIndex] = loss
             # Show metric
-            if True or gEpisode % 100 == 0:
+            if gEpisode % 100 == 0:
                 print >>sys.stderr, "Worker [%s] Episode [%d] Mean Loss [%f] Mean Step[%.2f] Mean Reward[%.4f]" % (self.name, gEpisode, np.mean(gLosses), np.mean(gSteps), np.mean(gRewards))
 
 if __name__ == "__main__":
