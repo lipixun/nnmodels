@@ -181,6 +181,7 @@ class AgentWorker(object):
                     if terminated or not np.array_equal(newState, state):
                         break
                 # Clip reward
+                totalReward += reward
                 reward = max(-1, min(1, reward))
                 exps.append([state, newState, action, reward, terminated])
                 if e > eEnd:
