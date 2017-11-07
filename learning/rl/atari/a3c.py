@@ -27,7 +27,7 @@ ValueLossFactor = 0.5
 PolicyEntropyFactor = 1e-2
 MaxEpoch        = 10000
 
-eStart, eEnd, eReduceStepNum = 1.0, 0.1, 10000000
+eStart, eEnd, eReduceStepNum = 1.0, 0.1, 1000000
 eStepReduceValue = float(eStart - eEnd) / float(eReduceStepNum)
 
 class A3CNetwork(object):
