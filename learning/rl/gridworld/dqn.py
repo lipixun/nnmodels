@@ -24,17 +24,16 @@ class QNetwork(object):
     def __init__(self, actionNums):
         """Create a new QNetwork
         """
-        self.state = tf.placeholder(tf.float32, [None, ImageSize * ImageSize * ImageDepth])
-        # Reshape to state to image
-        image = tf.reshape(self.state, [-1, ImageSize, ImageSize, ImageDepth])
+        self.state = tf.placeholder(tf.float32, [None, ImageSize, ImageSize, ImageDepth])
         # Apply cnn layers
         with tf.variable_scope("cnn-0"):
-            cnn0 = self.conv2d(image, 32, [8, 8], [1, 4, 4, 1])
+            cnn0 = self.conv2d(self.state, 32, [8, 8], [1, 4, 4, 1])
         with tf.variable_scope("cnn-1"):
             cnn1 = self.conv2d(cnn0, 64, [4, 4], [1, 2, 2, 1])
         with tf.variable_scope("cnn-2"):
             cnn2 = self.conv2d(cnn1, 64, [3, 3], [1, 1, 1, 1])
         cnnOut = tf.reshape(cnn2, [-1, np.prod([d.value for d in cnn2.shape[1:]])])
+        cnnOut = tf.nn.dropout(cnnOut, 0.9)
         # Duel-DQN
         with tf.variable_scope("value"):
             with tf.variable_scope("fc"):
@@ -49,14 +48,14 @@ class QNetwork(object):
         # Output
         self.output = value + advantage - tf.reduce_mean(advantage, axis=1, keep_dims=True)
         self.prediction = tf.argmax(self.output, axis=1)
+        #
         # Train method
+        #
         self.targetRewards = tf.placeholder(tf.float32, [None])
         self.actualActions = tf.placeholder(tf.int32, [None])
-        # Huber loss
         actualQValues = tf.reduce_sum(tf.one_hot(self.actualActions, actionNums) * self.output, axis=1)
-        #self.loss = tf.reduce_mean(tf.square(self.targetRewards - actualQValues))
         error = self.targetRewards - actualQValues
-        self.loss = tf.reduce_mean(tf.where(tf.abs(error) > 1.0, tf.abs(error), tf.square(error)))
+        self.loss = tf.reduce_mean(tf.where(tf.abs(error) > 1.0, tf.abs(error), tf.square(error))) # Huber loss
         self.updateop = tf.train.AdamOptimizer(learning_rate=1e-3).minimize(self.loss)
 
     def conv2d(self, inp, filters, ksize, strides):
@@ -137,14 +136,13 @@ def buildValueGraphUpdateOp(policyGraphVars, valueGraphVars, r):
 
 if __name__ == "__main__":
 
-    totalEpisodes   = 10000000
     preTrainSteps   = 50000
     maxEpochLength  = 100
     updateFreq      = 5
     batchSize       = 256
     discountFactor  = 0.99
 
-    eStart, eEnd, eReduceStepNum = 1.0, 0.1, 1000000
+    eStart, eEnd, eReduceStepNum = 1.0, 0.1, 10000000
 
     env = GameEnv(False, 5)
     expBuffer = ExperienceBuffer(size=100000)
@@ -187,7 +185,7 @@ if __name__ == "__main__":
                 if gStep < preTrainSteps or np.random.rand(1) < e: # pylint: disable=no-member
                     action = np.random.randint(0, env.actions) # pylint: disable=no-member
                 else:
-                    action, _ = policyGraph.predict(state.reshape(1, ImageSize * ImageSize * ImageDepth), session)
+                    action, _ = policyGraph.predict([state], session)
                     action = action[0]
                 # Execute the environment
                 newState, reward, terminated = env.step(action)
@@ -209,13 +207,13 @@ if __name__ == "__main__":
             if gStep > preTrainSteps:
                 exps = expBuffer.sample(batchSize)
                 # Calculate the target rewards
-                policyPreds, _ = policyGraph.predict(np.stack(exps[:, 1]).reshape(-1, ImageSize * ImageSize * ImageDepth), session)
-                _, valueOuts = valueGraph.predict(np.stack(exps[:, 1]).reshape(-1, ImageSize * ImageSize * ImageDepth), session)
+                policyPreds, _ = policyGraph.predict(np.stack(exps[:, 1]), session)
+                _, valueOuts = valueGraph.predict(np.stack(exps[:, 1]), session)
                 terminateFactor = np.invert(exps[:, 4]).astype(np.float32)    # pylint: disable=no-member
                 finalOuts = valueOuts[range(batchSize), policyPreds]   # final outs = The output reward of value network of each action that is predicted by policy network
                 targetRewards = exps[:, 3] + (finalOuts * discountFactor * terminateFactor)
                 # Update policy & value network
-                loss = policyGraph.update(np.stack(exps[:, 0]).reshape(-1, ImageSize * ImageSize * ImageDepth), targetRewards, exps[:, 2], session)
+                loss = policyGraph.update(np.stack(exps[:, 0]), targetRewards, exps[:, 2], session)
                 session.run(valueGraphUpdateOp)
                 totalLoss += loss
                 totalLossCount += 1
