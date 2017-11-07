@@ -25,8 +25,9 @@ discountFactor  = 0.99
 
 ValueLossFactor = 0.5
 PolicyEntropyFactor = 1e-2
+MaxEpoch        = 10000
 
-eStart, eEnd, eReduceStepNum = 1.0, 0.1, 1000000
+eStart, eEnd, eReduceStepNum = 1.0, 0.1, 10000000
 eStepReduceValue = float(eStart - eEnd) / float(eReduceStepNum)
 
 class A3CNetwork(object):
@@ -42,21 +43,15 @@ class A3CNetwork(object):
                 cnn0 = self.conv2d(self.state, 32, [8, 8], [1, 4, 4, 1])
             with tf.variable_scope("cnn-1"):
                 cnn1 = self.conv2d(cnn0, 64, [4, 4], [1, 2, 2, 1])
-            with tf.variable_scope("cnn-2"):
-                cnn2 = self.conv2d(cnn1, 64, [3, 3], [1, 1, 1, 1])
-            cnnOut = tf.reshape(cnn2, [-1, np.prod([d.value for d in cnn2.shape[1:]])])
+            cnnOut = tf.reshape(cnn1, [-1, np.prod([d.value for d in cnn1.shape[1:]])])
+            with tf.variable_scope("fc"):
+                fcOut = self.fc(cnnOut, 512, tf.nn.relu)
             # The value output
             with tf.variable_scope("value"):
-                with tf.variable_scope("fc"):
-                    fcOut = self.fc(cnnOut, 512, tf.nn.relu)
-                with tf.variable_scope("out"):
-                    self.value = self.fc(fcOut, 1)
+                self.value = self.fc(fcOut, 1)
             # The policy output
             with tf.variable_scope("policy"):
-                with tf.variable_scope("fc"):
-                    fcOut = self.fc(cnnOut, 512, tf.nn.relu)
-                with tf.variable_scope("out"):
-                    self.policy = self.fc(fcOut, actionNums, tf.nn.softmax)
+                self.policy = self.fc(fcOut, actionNums, tf.nn.softmax)
             # All trainable vars
             self.trainableVars = tf.contrib.framework.get_variables(scope, collection=tf.GraphKeys.GLOBAL_VARIABLES)
             #
@@ -68,10 +63,11 @@ class A3CNetwork(object):
                     self.targetValue = tf.placeholder(tf.float32, [None])   # The discounted v(s) + r
                     advantage = self.targetValue - tf.reshape(self.value, [-1])
                     # The loss consists of three parts: Policy loss, Value loss and Policy entropy
+                    policyLogProba = tf.log(self.policy + 1e-6)
                     # NOTE: The error == advantage only when we're using `1-step return loss`. If we're using `n-step return loss`, the error should be discounted(v(s)) - v(s)
                     valueLoss = tf.where(tf.abs(advantage) > 1.0, tf.abs(advantage), tf.square(advantage))  # Huber loss
-                    policyLoss = tf.negative(tf.log(tf.reduce_sum(tf.one_hot(self.actions, actionNums) * self.policy, axis=1) + 1e-10)) * tf.stop_gradient(advantage)
-                    policyEntropy = tf.negative(tf.reduce_sum(self.policy * tf.log(self.policy + 1e-10), axis=1))
+                    policyLoss = tf.negative(tf.reduce_sum(tf.one_hot(self.actions, actionNums) *policyLogProba, axis=1)) * tf.stop_gradient(advantage)
+                    policyEntropy = tf.negative(tf.reduce_sum(self.policy *policyLogProba, axis=1))
                     self.loss = tf.reduce_mean(policyLoss + ValueLossFactor * valueLoss + PolicyEntropyFactor * policyEntropy)
                     # The train method (To global network)
                     gradients = tf.gradients(self.loss, self.trainableVars)
@@ -136,10 +132,11 @@ class ExperienceBuffer(object):
 class AgentWorker(object):
     """The agent worker
     """
-    def __init__(self, name, gNetwork, localNetwork):
+    def __init__(self, name, actionNums, gNetwork, localNetwork):
         """Create a new agent worker
         """
         self.name = name
+        self.actionNums = actionNums
         self.gNetwork = gNetwork
         self.localNetwork = localNetwork
         # Create an op used to sync local network to global network
@@ -155,8 +152,8 @@ class AgentWorker(object):
         """
         print >>sys.stderr, "Worker [%s] Start" % self.name
         e = eStart
-        gEpisode = 0
         gStep = 0
+        gEpisode = 0
         gRewards, gRewardIndex = [0.0] * 100, -1
         gSteps, gStepIndex = [0.0] * 100, -1
         gLosses, gLossIndex = [0.0] * 100, -1
@@ -169,25 +166,27 @@ class AgentWorker(object):
             state = self.env.reset()
             epoch = 0
             totalReward = 0.0
-            while True:
+            while epoch < MaxEpoch:
                 epoch += 1
-                # Choose an action
-                if gStep < preTrainSteps or np.random.rand(1) < e: # pylint: disable=no-member
-                    action = self.env.action_space.sample()
-                else:
-                    _, actions = self.localNetwork.predict([state], session)
-                    actions = actions[0]
-                    action = np.random.choice(actions, p=actions)   # pylint: disable=no-member
-                    action = np.argmax(action == actions)
-                # Execute in environment
-                newState, reward, terminated, _ = self.env.step(action)
-                exps.append(np.array([state, newState, action, reward, terminated]).reshape(1, -1))    # Force terminated at the end of max epoch length
                 gStep += 1
+                # Choose an action
+                while True:
+                    if gStep < preTrainSteps or np.random.rand(1) < e: # pylint: disable=no-member
+                        action = self.env.action_space.sample()
+                    else:
+                        _, actions = self.localNetwork.predict([state], session)
+                        action = np.random.choice(self.actionNums, p=actions[0])   # pylint: disable=no-member
+                    # Execute in environment
+                    newState, reward, terminated, _ = self.env.step(action)
+                    if terminated or not np.array_equal(newState, state):
+                        break
+                # Clip reward
+                reward = max(-1, min(1, reward))
+                exps.append([state, newState, action, reward, terminated])
                 if e > eEnd:
                     e -= eStepReduceValue
                 # Update
                 state = newState
-                totalReward += reward
                 if terminated:
                     # Update gRewards and gSteps
                     gStepIndex = (gStepIndex + 1) % 100
@@ -200,12 +199,12 @@ class AgentWorker(object):
             # Train
             #
             if exps:
-                expBatch = np.stack(exps).reshape(-1, 5)
+                expBatch = np.stack(exps)
                 states = np.stack(expBatch[:, 0])
                 actions = np.stack(expBatch[:, 2])
                 nextStates = np.stack(expBatch[:, 1])
                 rewards = np.stack(expBatch[:, 3])
-                terminates = np.invert(expBatch[:, 4]).astype(np.float32)   # pylint: disable=no-member
+                terminates = np.invert(expBatch[:, 4].astype(np.bool)).astype(np.float32)   # pylint: disable=no-member
                 values, _ = self.localNetwork.predict(nextStates, session)
                 values = values.reshape(-1)
                 # The target values
@@ -223,7 +222,7 @@ class AgentWorker(object):
                 gLossIndex = (gLossIndex + 1) % 100
                 gLosses[gLossIndex] = loss
             # Show metric
-            if gEpisode % 100 == 0:
+            if True or gEpisode % 100 == 0:
                 print >>sys.stderr, "Worker [%s] Episode [%d] Mean Loss [%f] Mean Step[%.2f] Mean Reward[%.4f]" % (self.name, gEpisode, np.mean(gLosses), np.mean(gSteps), np.mean(gRewards))
 
 if __name__ == "__main__":
@@ -244,11 +243,11 @@ if __name__ == "__main__":
         # Start training
         with tf.Session() as session:
             # Create global network and workers
-            env = gym.make("Breakout-v0")
-            trainer = tf.train.AdamOptimizer(learning_rate=1e-4)
-            gNetwork = A3CNetwork("global", trainer, env.action_space.n)
+            #env = gym.make("Breakout-v0")
+            trainer = tf.train.AdamOptimizer(learning_rate=1e-3, use_locking=True)
+            gNetwork = A3CNetwork("global", trainer, 4)
             nWorkers = args.p if args.p else multiprocessing.cpu_count()
-            workers = [ AgentWorker("worker-%d" % i, gNetwork, A3CNetwork("worker-%i" % i, trainer, env.action_space.n, globalVars=gNetwork.trainableVars)) for i in range(nWorkers) ]
+            workers = [ AgentWorker("worker-%d" % i, 4, gNetwork, A3CNetwork("worker-%i" % i,trainer, 4, globalVars=gNetwork.trainableVars)) for i in range(nWorkers) ]
             # Init all variables
             session.run(tf.global_variables_initializer())
             # Start all threads and wait

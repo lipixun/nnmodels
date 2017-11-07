@@ -46,15 +46,15 @@ class QNetwork(object):
             with tf.variable_scope("out"):
                 advantage = self.fc(fcOut, actionNums)
         # Output
-        self.output = value + advantage - tf.reduce_mean(advantage, axis=1, keep_dims=True)
-        self.prediction = tf.argmax(self.output, axis=1)
+        self.outputQ = value + advantage - tf.reduce_mean(advantage, axis=1, keep_dims=True)
+        self.prediction = tf.argmax(self.outputQ, axis=1)
         #
         # Train method
         #
-        self.targetRewards = tf.placeholder(tf.float32, [None])
-        self.actualActions = tf.placeholder(tf.int32, [None])
-        actualQValues = tf.reduce_sum(tf.one_hot(self.actualActions, actionNums) * self.output, axis=1)
-        error = self.targetRewards - actualQValues
+        self.targetQ = tf.placeholder(tf.float32, [None])
+        self.actions = tf.placeholder(tf.int32, [None])
+        qValues = tf.reduce_sum(tf.one_hot(self.actions, actionNums) * self.outputQ, axis=1)
+        error = self.targetQ - qValues
         self.loss = tf.reduce_mean(tf.where(tf.abs(error) > 1.0, tf.abs(error), tf.square(error))) # Huber loss
         self.updateop = tf.train.AdamOptimizer(learning_rate=1e-3).minimize(self.loss)
 
@@ -78,12 +78,12 @@ class QNetwork(object):
     def predict(self, states, session):
         """Predict
         """
-        return session.run([self.prediction, self.output], feed_dict={self.state: states})
+        return session.run([self.prediction, self.outputQ], feed_dict={self.state: states})
 
-    def update(self, states, rewards, actions, session):
+    def update(self, states, targetQ, actions, session):
         """Update the model
         """
-        _, loss = session.run([self.updateop, self.loss], feed_dict={self.state: states, self.targetRewards: rewards, self.actualActions: actions})
+        _, loss = session.run([self.updateop, self.loss], feed_dict={self.state: states, self.targetQ: targetQ, self.actions: actions})
         return loss
 
 class ExperienceBuffer(object):
@@ -95,6 +95,11 @@ class ExperienceBuffer(object):
         self.size = size
         self.index = -1
         self.buffer = []
+
+    def __len__(self):
+        """Length
+        """
+        return len(self.buffer)
 
     def add(self, experience):
         """Add an experience
@@ -136,92 +141,105 @@ def buildValueGraphUpdateOp(policyGraphVars, valueGraphVars, r):
 
 if __name__ == "__main__":
 
-    preTrainSteps   = 50000
-    maxEpochLength  = 100
-    updateFreq      = 5
-    batchSize       = 256
-    discountFactor  = 0.99
+    from argparse import ArgumentParser
 
-    eStart, eEnd, eReduceStepNum = 1.0, 0.1, 10000000
+    def getArguments():
+        """Get arguments
+        """
+        parser = ArgumentParser(description="GridWorld DQN")
+        parser.add_argument("--pretrain-steps", dest="preTrainSteps", type=int, default=10000, help="The pre-train steps")
+        parser.add_argument("--discount-factor", dest="discountFactor", type=float, default=0.99, help="The discount factor")
+        parser.add_argument("--batch-size", dest="batchSize", default=256, help="The batch size")
+        parser.add_argument("--max-epoch", dest="maxEpoch", type=int, default=100, help="The max epoch")
+        parser.add_argument("--e-start", dest="eStart", type=float, default=1.0, help="The e start")
+        parser.add_argument("--e-end", dest="eEnd", type=float, default=0.1, help="The e end")
+        parser.add_argument("--e-reduce-steps", dest="eReduceSteps", type=int, default=1e7, help="The e reduce step number")
+        parser.add_argument("--grid-size", dest="gridSize", type=int, default=5, help="The grid size")
+        return parser.parse_args()
 
-    env = GameEnv(False, 5)
-    expBuffer = ExperienceBuffer(size=100000)
+    def main():
+        """The main entry
+        """
+        args = getArguments()
+        # Init
+        env = GameEnv(False, args.gridSize)
+        expBuffer = ExperienceBuffer(size=1000000)
+        # Create networks
+        with tf.variable_scope("policy") as scope:
+            policyGraph = QNetwork(env.actions)
+            policyGraphVars = tf.contrib.framework.get_variables(scope, collection=tf.GraphKeys.GLOBAL_VARIABLES)
+        with tf.variable_scope("value") as scope:
+            valueGraph = QNetwork(env.actions)
+            valueGraphVars = tf.contrib.framework.get_variables(scope, collection=tf.GraphKeys.GLOBAL_VARIABLES)
+            # Get the update op of value graph
+            valueGraphUpdateOp = buildValueGraphUpdateOp(policyGraphVars, valueGraphVars, 1e-3)
+        # Variables
+        e = args.eStart
+        gStep = 0
+        eStepReduceValue = float(args.eStart - args.eEnd) / float(args.eReduceSteps)
+        # Counters
+        totalLoss, totalLossCount = 0.0, 0
+        totalSteps, totalStepIndex = [0.0] * 100, -1
+        totalRewards, totalRewardIndex = [0.0] * 100, -1
+        # Train
+        with tf.Session(config=tfutils.session.newConfigProto(0.25)) as session:
+            # Init all variables
+            session.run(tf.global_variables_initializer())
+            episode = 0
+            while True:
+                episode += 1
+                epoch = 0
+                totalReward = 0.0
+                # Reset the environment
+                state = env.reset()
+                # Run
+                while epoch < args.maxEpoch:
+                    gStep += 1
+                    epoch += 1
+                    # Choose an action
+                    if gStep < args.preTrainSteps or np.random.rand(1) < e: # pylint: disable=no-member
+                        action = np.random.randint(0, env.actions) # pylint: disable=no-member
+                    else:
+                        _, outputQ = policyGraph.predict([state], session)
+                        outputQ = outputQ[0]
+                        outputQ[outputQ <= 0.0] = 1e-2
+                        action = np.random.choice(range(0, env.actions), size=1, p=outputQ / outputQ.sum())[0]  # pylint: disable=no-member
+                    # Execute the environment
+                    newState, reward, terminated = env.step(action)
+                    expBuffer.add(np.array([state, newState, action, reward, terminated]).reshape(1, -1))    # Force terminated at the end of max epoch length
+                    if e > args.eEnd:
+                        e -= eStepReduceValue
+                    # Replace & update
+                    state = newState
+                    totalReward += reward
+                    if terminated:
+                        break
+                # Update
+                totalStepIndex = (totalStepIndex + 1) % 100
+                totalRewardIndex = (totalRewardIndex + 1) % 100
+                totalSteps[totalStepIndex] = epoch
+                totalRewards[totalRewardIndex] = totalReward
+                # Update network
+                if gStep > args.preTrainSteps and len(expBuffer) >= args.batchSize:
+                    exps = expBuffer.sample(args.batchSize)
+                    # Calculate the target rewards
+                    policyPreds, _ = policyGraph.predict(np.stack(exps[:, 1]), session)
+                    _, valueOuts = valueGraph.predict(np.stack(exps[:, 1]), session)
+                    terminateFactor = np.invert(exps[:, 4].astype(np.bool)).astype(np.float32)    # pylint: disable=no-member
+                    finalOuts = valueOuts[range(args.batchSize), policyPreds]   # final outs = The output reward of value network of each action that is predicted by policy network
+                    targetRewards = exps[:, 3] + (finalOuts * args.discountFactor * terminateFactor)
+                    # Update policy & value network
+                    loss = policyGraph.update(np.stack(exps[:, 0]), targetRewards, exps[:, 2], session)
+                    session.run(valueGraphUpdateOp)
+                    totalLoss += loss
+                    totalLossCount += 1
+                # Show metrics
+                if episode % 100 == 0:
+                    loss = 0.0
+                    if totalLossCount:
+                        loss = totalLoss / totalLossCount
+                        totalLoss = 0.0
+                        totalLossCount = 0
+                    print "Episode [%d] Global Step [%d] E[%.4f] Mean Loss [%f] Mean Step [%.4f] Mean Reward [%.4f] Var Reward [%.4f]" % (episode, gStep, e, loss, np.mean(totalSteps), np.mean(totalRewards), np.var(totalRewards))
 
-    # Create networks
-    with tf.variable_scope("policy") as scope:
-        policyGraph = QNetwork(env.actions)
-        policyGraphVars = tf.contrib.framework.get_variables(scope, collection=tf.GraphKeys.GLOBAL_VARIABLES)
-    with tf.variable_scope("value") as scope:
-        valueGraph = QNetwork(env.actions)
-        valueGraphVars = tf.contrib.framework.get_variables(scope, collection=tf.GraphKeys.GLOBAL_VARIABLES)
-        # Get the update op of value graph
-        valueGraphUpdateOp = buildValueGraphUpdateOp(policyGraphVars, valueGraphVars, 1e-3)
-
-    #
-    # Run training
-    #
-    e = eStart
-    eStepReduceValue = float(eStart - eEnd) / float(eReduceStepNum)
-    gStep = 0
-
-    totalLoss, totalLossCount = 0.0, 0
-    totalSteps, totalStepIndex = [0.0] * 100, -1
-    totalRewards, totalRewardIndex = [0.0] * 100, -1
-
-    with tf.Session(config=tfutils.session.newConfigProto(0.25)) as session:
-        # Init all variables
-        session.run(tf.global_variables_initializer())
-        episode = 0
-        while True:
-            episode += 1
-            # Reset the environment and buffer
-            state = env.reset()
-            totalReward = 0.0
-            epoch = 0
-            # Run
-            while epoch < maxEpochLength:
-                epoch += 1
-                # Choose an action
-                if gStep < preTrainSteps or np.random.rand(1) < e: # pylint: disable=no-member
-                    action = np.random.randint(0, env.actions) # pylint: disable=no-member
-                else:
-                    action, _ = policyGraph.predict([state], session)
-                    action = action[0]
-                # Execute the environment
-                newState, reward, terminated = env.step(action)
-                expBuffer.add(np.array([state, newState, action, reward, terminated]).reshape(1, -1))    # Force terminated at the end of max epoch length
-                gStep += 1
-                if e > eEnd:
-                    e -= eStepReduceValue
-                # Replace & update
-                totalReward += reward
-                state = newState
-                if terminated:
-                    break
-            # Update
-            totalStepIndex = (totalStepIndex + 1) % 100
-            totalRewardIndex = (totalRewardIndex + 1) % 100
-            totalSteps[totalStepIndex] = epoch
-            totalRewards[totalRewardIndex] = totalReward
-            # Update network
-            if gStep > preTrainSteps:
-                exps = expBuffer.sample(batchSize)
-                # Calculate the target rewards
-                policyPreds, _ = policyGraph.predict(np.stack(exps[:, 1]), session)
-                _, valueOuts = valueGraph.predict(np.stack(exps[:, 1]), session)
-                terminateFactor = np.invert(exps[:, 4]).astype(np.float32)    # pylint: disable=no-member
-                finalOuts = valueOuts[range(batchSize), policyPreds]   # final outs = The output reward of value network of each action that is predicted by policy network
-                targetRewards = exps[:, 3] + (finalOuts * discountFactor * terminateFactor)
-                # Update policy & value network
-                loss = policyGraph.update(np.stack(exps[:, 0]), targetRewards, exps[:, 2], session)
-                session.run(valueGraphUpdateOp)
-                totalLoss += loss
-                totalLossCount += 1
-            # Show metrics
-            if episode % 100 == 0:
-                loss = 0.0
-                if totalLossCount:
-                    loss = totalLoss / totalLossCount
-                    totalLoss = 0.0
-                    totalLossCount = 0
-                print "Episode [%d] Global Step [%d] E[%.4f] Mean Loss [%f] Mean Step [%.4f] Mean Reward [%.4f] Var Reward [%.4f]" % (episode, gStep, e, loss, np.mean(totalSteps), np.mean(totalRewards), np.var(totalRewards))
+    main()

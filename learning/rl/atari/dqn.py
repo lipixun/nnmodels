@@ -199,7 +199,7 @@ if __name__ == "__main__":
                 # Calculate the target rewards
                 policyPreds, _ = policyGraph.predict(np.stack(exps[:, 1]), session)
                 _, valueOuts = valueGraph.predict(np.stack(exps[:, 1]), session)
-                terminateFactor = np.invert(exps[:, 4]).astype(np.float32)    # pylint: disable=no-member
+                terminateFactor = np.invert(exps[:, 4].astype(np.bool)).astype(np.float32)    # pylint: disable=no-member
                 finalOuts = valueOuts[range(batchSize), policyPreds]   # final outs = The output reward of value network of each action that is predicted by policy network
                 targetRewards = exps[:, 3] + (finalOuts * discountFactor * terminateFactor)
                 # Update policy & value network
