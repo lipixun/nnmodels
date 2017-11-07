@@ -38,12 +38,12 @@ class QNetwork(object):
         # Duel-QDN
         with tf.variable_scope("value"):
             with tf.variable_scope("fc"):
-                fcOut = self.fc(cnnOut, 512, tf.nn.tanh)
+                fcOut = self.fc(cnnOut, 512, tf.nn.relu)
             with tf.variable_scope("out"):
                 value = self.fc(fcOut, 1)
         with tf.variable_scope("advantage"):
             with tf.variable_scope("fc"):
-                fcOut = self.fc(cnnOut, 512, tf.nn.tanh)
+                fcOut = self.fc(cnnOut, 512, tf.nn.relu)
             with tf.variable_scope("out"):
                 advantage = self.fc(fcOut, actionNums)
         # Output
