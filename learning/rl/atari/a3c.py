@@ -189,13 +189,12 @@ class AgentWorker(object):
                 # Update
                 state = newState
                 if terminated:
-                    # Update gRewards and gSteps
-                    gStepIndex = (gStepIndex + 1) % 100
-                    gRewardIndex = (gRewardIndex + 1) % 100
-                    gSteps[gStepIndex] = epoch
-                    gRewards[gRewardIndex] = totalReward
-                    # Done
                     break
+            # Update gRewards and gSteps
+            gStepIndex = (gStepIndex + 1) % 100
+            gRewardIndex = (gRewardIndex + 1) % 100
+            gSteps[gStepIndex] = epoch
+            gRewards[gRewardIndex] = totalReward
             #
             # Train
             #
