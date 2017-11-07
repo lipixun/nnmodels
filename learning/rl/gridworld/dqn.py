@@ -35,7 +35,7 @@ class QNetwork(object):
         with tf.variable_scope("cnn-2"):
             cnn2 = self.conv2d(cnn1, 64, [3, 3], [1, 1, 1, 1])
         cnnOut = tf.reshape(cnn2, [-1, np.prod([d.value for d in cnn2.shape[1:]])])
-        # Duel-QDN
+        # Duel-DQN
         with tf.variable_scope("value"):
             with tf.variable_scope("fc"):
                 fcOut = self.fc(cnnOut, 512, tf.nn.relu)
@@ -116,7 +116,7 @@ class ExperienceBuffer(object):
     def sample(self, size):
         """Sample from buffer
         """
-        return np.reshape(np.array(random.sample(self.buffer, size)), [size, 5])
+        return np.array(random.sample(self.buffer, size)).reshape([size, 5])
 
 #
 # NOTE:
@@ -173,12 +173,16 @@ if __name__ == "__main__":
     with tf.Session(config=tfutils.session.newConfigProto(0.25)) as session:
         # Init all variables
         session.run(tf.global_variables_initializer())
-        for episode in xrange(totalEpisodes):
+        episode = 0
+        while True:
+            episode += 1
             # Reset the environment and buffer
             state = env.reset()
             totalReward = 0.0
+            epoch = 0
             # Run
-            for epoch in xrange(maxEpochLength):
+            while epoch < maxEpochLength:
+                epoch += 1
                 # Choose an action
                 if gStep < preTrainSteps or np.random.rand(1) < e: # pylint: disable=no-member
                     action = np.random.randint(0, env.actions) # pylint: disable=no-member
@@ -199,7 +203,7 @@ if __name__ == "__main__":
             # Update
             totalStepIndex = (totalStepIndex + 1) % 100
             totalRewardIndex = (totalRewardIndex + 1) % 100
-            totalSteps[totalStepIndex] = epoch + 1 # pylint: disable=undefined-loop-variable
+            totalSteps[totalStepIndex] = epoch
             totalRewards[totalRewardIndex] = totalReward
             # Update network
             if gStep > preTrainSteps:
@@ -222,4 +226,4 @@ if __name__ == "__main__":
                     loss = totalLoss / totalLossCount
                     totalLoss = 0.0
                     totalLossCount = 0
-                print "Episode [%d] Global Step [%d] E[%.4f] Mean Loss [%f] Mean Step [%.4f] Mean Reward [%.4f]" % (episode, gStep, e, loss, np.mean(totalSteps), np.mean(totalRewards))
+                print "Episode [%d] Global Step [%d] E[%.4f] Mean Loss [%f] Mean Step [%.4f] Mean Reward [%.4f] Var Reward [%.4f]" % (episode, gStep, e, loss, np.mean(totalSteps), np.mean(totalRewards), np.var(totalRewards))
