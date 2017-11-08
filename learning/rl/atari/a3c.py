@@ -129,28 +129,71 @@ class ExperienceBuffer(object):
         """
         return np.reshape(np.array(random.sample(self.buffer, size)), [size, 5])
 
+class EnvGroup(object):
+    """The env group
+    """
+    def __init__(self, name, num):
+        """Create a new EnvGroup
+        """
+        self.num = num
+        self.envs = [gym.make(name) for _ in range(num)]
+        self.envTerminates = [False] * num
+
+    @property
+    def actionNums(self):
+        """Get the action nums
+        """
+        return self.envs[0].action_space.n
+
+    def render(self):
+        """Render
+        """
+        self.envs[0].render()
+
+    def reset(self):
+        """Reset all envs
+        """
+        self.envTerminates = [False] * self.num
+        return np.stack([env.reset() for env in self.envs])
+
+    def step(self, actions):
+        """Run envs
+        """
+        index = 0
+        states, rewards, terminates, infos = [], [], [], []
+        for i, env in enumerate(self.envs):
+            if self.envTerminates[i]:
+                continue
+            s, r, t, info = env.step(actions[index])
+            index += 1
+            states.append(s)
+            rewards.append(r)
+            terminates.append(t)
+            infos.append(info)
+            if t:
+                self.envTerminates[i] = True
+        return np.stack(states), np.stack(rewards), np.stack(terminates), infos
+
 class AgentWorker(object):
     """The agent worker
     """
-    def __init__(self, name, actionNums, gNetwork, localNetwork):
+    def __init__(self, name, envs, trainer, gNetwork):
         """Create a new agent worker
         """
         self.name = name
-        self.actionNums = actionNums
+        self.envs = envs
         self.gNetwork = gNetwork
-        self.localNetwork = localNetwork
+        self.localNetwork = A3CNetwork(name, trainer, envs.actionNums, globalVars=gNetwork.trainableVars)
         # Create an op used to sync local network to global network
         ops = []
-        for gVar, lVar in zip(gNetwork.trainableVars, localNetwork.trainableVars):
+        for gVar, lVar in zip(gNetwork.trainableVars, self.localNetwork.trainableVars):
             ops.append(tf.assign(lVar, gVar))
         self.syncOp = tf.group(*ops)
-        # Create a new environment
-        self.env = gym.make("Breakout-v0")
 
     def __call__(self, session):
         """Run this worker
         """
-        print >>sys.stderr, "Worker [%s] Start" % self.name
+        print >>sys.stderr, "Worker [%s] Start with [%d] envs" % (self.name, self.envs.num)
         e = eStart
         gStep = 0
         gEpisode = 0
@@ -163,33 +206,35 @@ class AgentWorker(object):
             session.run(self.syncOp)
             # Reset env
             exps = []
-            state = self.env.reset()
+            states = self.envs.reset()
             epoch = 0
             totalReward = 0.0
             while epoch < MaxEpoch:
                 epoch += 1
                 gStep += 1
                 # Choose an action
-                while True:
-                    if gStep < preTrainSteps or np.random.rand(1) < e: # pylint: disable=no-member
-                        action = self.env.action_space.sample()
-                    else:
-                        _, actions = self.localNetwork.predict([state], session)
-                        action = np.random.choice(self.actionNums, p=actions[0])   # pylint: disable=no-member
-                    # Execute in environment
-                    newState, reward, terminated, _ = self.env.step(action)
-                    if terminated or not np.array_equal(newState, state):
-                        break
+                if gStep < preTrainSteps or np.random.rand(1) < e: # pylint: disable=no-member
+                    actions = [np.random.randint(0, self.envs.actionNums) for _ in range(states.shape[0])] # pylint: disable=no-member
+                else:
+                    _, actionProbas = self.localNetwork.predict(states, session)
+                    actions = self.selectActions(actionProbas)
+                #print actions
+                # Execute in environment
+                newStates, rewards, terminates, _ = self.envs.step(actions)
+                totalReward += rewards.sum()
                 # Clip reward
-                totalReward += reward
-                reward = max(-1, min(1, reward))
-                exps.append([state, newState, action, reward, terminated])
+                rewards[rewards > 1] = 1
+                rewards[rewards < -1] = -1
+                # Add to exps
+                for i, newState in enumerate(newStates):
+                    exps.append([states[i], newState, actions[i], rewards[i], terminates[i]])
                 if e > eEnd:
-                    e -= eStepReduceValue
+                   e -= eStepReduceValue
                 # Update
-                state = newState
-                if terminated:
+                newStates = [s for (i, s) in enumerate(newStates) if not terminates[i]]
+                if not newStates:
                     break
+                states = np.stack(newStates)
             # Update gRewards and gSteps
             gStepIndex = (gStepIndex + 1) % 100
             gRewardIndex = (gRewardIndex + 1) % 100
@@ -225,6 +270,14 @@ class AgentWorker(object):
             if gEpisode % 100 == 0:
                 print >>sys.stderr, "Worker [%s] Episode [%d] E [%.2f] Mean Loss [%f] Mean Step[%.2f] Mean Reward[%.4f]" % (self.name, gEpisode, e, np.mean(gLosses), np.mean(gSteps), np.mean(gRewards))
 
+    def selectActions(self, probas):
+        """Select actions from action probas
+        """
+        actions = []
+        for proba in probas:
+            actions.append(np.random.choice(proba.shape[0], p=proba)) # pylint: disable=no-member
+        return actions
+
 if __name__ == "__main__":
 
     from argparse import ArgumentParser
@@ -233,7 +286,9 @@ if __name__ == "__main__":
         """Get arguments
         """
         parser = ArgumentParser(description="Atari A3C")
-        parser.add_argument("-p", dest="p", type=int, help="The parallel worker number. Will use all cpu cores if not specified")
+        parser.add_argument("-p", "--parallel", dest="p", type=int, help="The parallel worker number. Will use all cpu cores if not specified")
+        parser.add_argument("-n", "--name", dest="name", default="Breakout-v0", help="The game env name")
+        parser.add_argument("-e", "--env-num-per-worker", dest="envNumPerWorker", type=int, default=64, help="The environment number per worker")
         return parser.parse_args()
 
     def main():
@@ -243,11 +298,10 @@ if __name__ == "__main__":
         # Start training
         with tf.Session() as session:
             # Create global network and workers
-            #env = gym.make("Breakout-v0")
+            env = gym.make(args.name)
             trainer = tf.train.AdamOptimizer(learning_rate=1e-3, use_locking=True)
-            gNetwork = A3CNetwork("global", trainer, 4)
-            nWorkers = args.p if args.p else multiprocessing.cpu_count()
-            workers = [ AgentWorker("worker-%d" % i, 4, gNetwork, A3CNetwork("worker-%i" % i,trainer, 4, globalVars=gNetwork.trainableVars)) for i in range(nWorkers) ]
+            gNetwork = A3CNetwork("global", trainer, env.action_space.n)
+            workers = [ AgentWorker("worker-%d" % i, EnvGroup(args.name, args.envNumPerWorker), trainer, gNetwork) for i in range(args.p if args.p else multiprocessing.cpu_count()) ]
             # Init all variables
             session.run(tf.global_variables_initializer())
             # Start all threads and wait
