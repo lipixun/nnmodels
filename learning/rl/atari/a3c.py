@@ -27,7 +27,7 @@ ValueLossFactor = 0.5
 PolicyEntropyFactor = 1e-2
 MaxEpoch        = 10000
 
-eStart, eEnd, eReduceStepNum = 1.0, 0.1, 1000000
+eStart, eEnd, eReduceStepNum = 1.0, 0.1, 100000
 eStepReduceValue = float(eStart - eEnd) / float(eReduceStepNum)
 
 class A3CNetwork(object):
@@ -218,7 +218,6 @@ class AgentWorker(object):
                 else:
                     _, actionProbas = self.localNetwork.predict(states, session)
                     actions = self.selectActions(actionProbas)
-                #print actions
                 # Execute in environment
                 newStates, rewards, terminates, _ = self.envs.step(actions)
                 totalReward += rewards.sum()
@@ -239,7 +238,7 @@ class AgentWorker(object):
             gStepIndex = (gStepIndex + 1) % 100
             gRewardIndex = (gRewardIndex + 1) % 100
             gSteps[gStepIndex] = epoch
-            gRewards[gRewardIndex] = totalReward
+            gRewards[gRewardIndex] = totalReward / float(self.envs.num)
             #
             # Train
             #
