@@ -120,7 +120,7 @@ class ExperienceBuffer(object):
     def sample(self, size):
         """Sample from buffer
         """
-        return np.array(random.sample(self.buffer, size)).reshape([size, 5])
+        return np.stack(random.sample(self.buffer, size)).reshape([-1, 5])
 
 #
 # NOTE:
@@ -128,14 +128,12 @@ class ExperienceBuffer(object):
 #   The `Value Graph` here is `targetQN` in the original codes
 #
 
-def buildValueGraphUpdateOp(policyGraphVars, valueGraphVars, r):
+def buildValueGraphUpdateOp(policyGraphVars, targetGraphVars):
     """Build the update op of value graph
     """
     ops = []
-    r = tf.constant(r)
     for i, var in enumerate(policyGraphVars):
-        value = var * r + (1 - r) * valueGraphVars[i]
-        ops.append(tf.assign(valueGraphVars[i], value))
+        ops.append(tf.assign(targetGraphVars[i], var))
     # Group all operations together and return
     return tf.group(*ops)
 
@@ -147,7 +145,8 @@ if __name__ == "__main__":
         """Get arguments
         """
         parser = ArgumentParser(description="GridWorld DQN")
-        parser.add_argument("--pretrain-steps", dest="preTrainSteps", type=int, default=10000, help="The pre-train steps")
+        parser.add_argument("--pretrain-steps", dest="preTrainSteps", type=int, default=100, help="The pre-train steps")
+        parser.add_argument("--update-target-network-steps", dest="updateTargetNetworkSteps", type=int, default=10000, help="The step interval used to update target network")
         parser.add_argument("--discount-factor", dest="discountFactor", type=float, default=0.99, help="The discount factor")
         parser.add_argument("--batch-size", dest="batchSize", default=256, help="The batch size")
         parser.add_argument("--max-epoch", dest="maxEpoch", type=int, default=100, help="The max epoch")
@@ -155,32 +154,31 @@ if __name__ == "__main__":
         parser.add_argument("--e-end", dest="eEnd", type=float, default=0.1, help="The e end")
         parser.add_argument("--e-reduce-steps", dest="eReduceSteps", type=int, default=1e7, help="The e reduce step number")
         parser.add_argument("--grid-size", dest="gridSize", type=int, default=5, help="The grid size")
+        parser.add_argument("-e", "--env-nums", dest="envNums", type=int, default=64, help="The number of grid envs that is observed at the same time")
         return parser.parse_args()
 
     def main():
         """The main entry
         """
         args = getArguments()
-        # Init
-        env = GameEnv(False, args.gridSize)
-        expBuffer = ExperienceBuffer(size=1000000)
+        # Create environments
+        envs = [GameEnv(False, args.gridSize) for _ in range(args.envNums)]
+        expBuffer = ExperienceBuffer(size=100000)
         # Create networks
         with tf.variable_scope("policy") as scope:
-            policyGraph = QNetwork(env.actions)
+            policyGraph = QNetwork(envs[0].actions)
             policyGraphVars = tf.contrib.framework.get_variables(scope, collection=tf.GraphKeys.GLOBAL_VARIABLES)
         with tf.variable_scope("value") as scope:
-            valueGraph = QNetwork(env.actions)
-            valueGraphVars = tf.contrib.framework.get_variables(scope, collection=tf.GraphKeys.GLOBAL_VARIABLES)
+            targetGraph = QNetwork(envs[0].actions)
+            targetGraphVars = tf.contrib.framework.get_variables(scope, collection=tf.GraphKeys.GLOBAL_VARIABLES)
             # Get the update op of value graph
-            valueGraphUpdateOp = buildValueGraphUpdateOp(policyGraphVars, valueGraphVars, 1e-3)
+            targetGraphUpdateOp = buildValueGraphUpdateOp(policyGraphVars, targetGraphVars)
         # Variables
         e = args.eStart
         gStep = 0
         eStepReduceValue = float(args.eStart - args.eEnd) / float(args.eReduceSteps)
         # Counters
-        totalLoss, totalLossCount = 0.0, 0
-        totalSteps, totalStepIndex = [0.0] * 100, -1
-        totalRewards, totalRewardIndex = [0.0] * 100, -1
+        gLosses, gRewards = [], []
         # Train
         with tf.Session(config=tfutils.session.newConfigProto(0.25)) as session:
             # Init all variables
@@ -189,57 +187,56 @@ if __name__ == "__main__":
             while True:
                 episode += 1
                 epoch = 0
-                totalReward = 0.0
+                epochRewards = [0.0] * len(envs)
                 # Reset the environment
-                state = env.reset()
+                states = []
+                for env in envs:
+                    states.append(env.reset())
+                states = np.stack(states)
                 # Run
                 while epoch < args.maxEpoch:
                     gStep += 1
                     epoch += 1
-                    # Choose an action
-                    if gStep < args.preTrainSteps or np.random.rand(1) < e: # pylint: disable=no-member
-                        action = np.random.randint(0, env.actions) # pylint: disable=no-member
+                    # Check update target network or not
+                    if gStep % args.updateTargetNetworkSteps:
+                        session.run(targetGraphUpdateOp)
+                    # Choose actions (By e-greedy)
+                    if gStep < args.preTrainSteps or np.random.rand(1) < e:     # pylint: disable=no-member
+                        actions = [np.random.randint(0, envs[0].actions) for _ in envs]   # pylint: disable=no-member
                     else:
-                        _, outputQ = policyGraph.predict([state], session)
-                        outputQ = outputQ[0]
-                        outputQ[outputQ <= 0.0] = 1e-2
-                        action = np.random.choice(range(0, env.actions), size=1, p=outputQ / outputQ.sum())[0]  # pylint: disable=no-member
+                        actions, _ = policyGraph.predict(states, session)
+                        actions = actions.reshape(-1)
                     # Execute the environment
-                    newState, reward, terminated = env.step(action)
-                    expBuffer.add(np.array([state, newState, action, reward, terminated]).reshape(1, -1))    # Force terminated at the end of max epoch length
+                    newStates = []
+                    allTerminated = True
+                    for i, action in enumerate(actions):
+                        s, r, t = envs[i].step(action)
+                        expBuffer.add(np.array([states[i], s, action, r, t]))    # Force terminated at the end of max epoch length
+                        newStates.append(s)
+                        if not t:
+                            epochRewards[i] += r
+                            allTerminated = False
                     if e > args.eEnd:
                         e -= eStepReduceValue
-                    # Replace & update
-                    state = newState
-                    totalReward += reward
-                    if terminated:
+                    if allTerminated:
                         break
-                # Update
-                totalStepIndex = (totalStepIndex + 1) % 100
-                totalRewardIndex = (totalRewardIndex + 1) % 100
-                totalSteps[totalStepIndex] = epoch
-                totalRewards[totalRewardIndex] = totalReward
+                    states = np.stack(newStates)
+                gRewards.extend(epochRewards)
                 # Update network
                 if gStep > args.preTrainSteps and len(expBuffer) >= args.batchSize:
                     exps = expBuffer.sample(args.batchSize)
                     # Calculate the target rewards
                     policyPreds, _ = policyGraph.predict(np.stack(exps[:, 1]), session)
-                    _, valueOuts = valueGraph.predict(np.stack(exps[:, 1]), session)
+                    _, valueOuts = targetGraph.predict(np.stack(exps[:, 1]), session)
                     terminateFactor = np.invert(exps[:, 4].astype(np.bool)).astype(np.float32)    # pylint: disable=no-member
-                    finalOuts = valueOuts[range(args.batchSize), policyPreds]   # final outs = The output reward of value network of each action that is predicted by policy network
-                    targetRewards = exps[:, 3] + (finalOuts * args.discountFactor * terminateFactor)
-                    # Update policy & value network
-                    loss = policyGraph.update(np.stack(exps[:, 0]), targetRewards, exps[:, 2], session)
-                    session.run(valueGraphUpdateOp)
-                    totalLoss += loss
-                    totalLossCount += 1
+                    targetQ = exps[:, 3] + (valueOuts[range(args.batchSize), policyPreds] * args.discountFactor * terminateFactor)
+                    # Update policy network
+                    loss = policyGraph.update(np.stack(exps[:, 0]), targetQ, exps[:, 2], session)
+                    # Add loss
+                    gLosses.append(loss)
                 # Show metrics
                 if episode % 100 == 0:
-                    loss = 0.0
-                    if totalLossCount:
-                        loss = totalLoss / totalLossCount
-                        totalLoss = 0.0
-                        totalLossCount = 0
-                    print "Episode [%d] Global Step [%d] E[%.4f] Mean Loss [%f] Mean Step [%.4f] Mean Reward [%.4f] Var Reward [%.4f]" % (episode, gStep, e, loss, np.mean(totalSteps), np.mean(totalRewards), np.var(totalRewards))
+                    print "Episode [%d] Global Step [%d] E[%.4f] | Latest 100 Episodes: Mean Loss [%f] Reward Mean [%.4f] Var [%.4f]" % (episode, gStep, e, np.mean(gLosses), np.mean(gRewards), np.var(gRewards))
+                    gLosses, gRewards = [], []
 
     main()
