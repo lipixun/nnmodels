@@ -11,6 +11,7 @@
 import random
 
 import gym
+import tfutils
 import numpy as np
 import tensorflow as tf
 

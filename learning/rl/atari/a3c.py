@@ -16,6 +16,7 @@ import threading
 import multiprocessing
 
 import gym
+import tfutils
 import numpy as np
 import tensorflow as tf
 
@@ -298,7 +299,7 @@ if __name__ == "__main__":
         """
         args = getArguments()
         # Start training
-        with tf.Session() as session:
+        with tf.Session(config=tfutils.session.newConfigProto(0.25)) as session:
             # Create global network and workers
             env = gym.make(args.name)
             trainer = tf.train.AdamOptimizer(learning_rate=1e-3, use_locking=True)
