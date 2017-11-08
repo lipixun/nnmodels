@@ -229,7 +229,7 @@ class AgentWorker(object):
                 for i, newState in enumerate(newStates):
                     exps.append([states[i], newState, actions[i], rewards[i], terminates[i]])
                 if e > eEnd:
-                   e -= eStepReduceValue
+                    e -= eStepReduceValue
                 # Update
                 newStates = [s for (i, s) in enumerate(newStates) if not terminates[i]]
                 if not newStates:
