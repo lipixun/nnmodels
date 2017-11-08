@@ -254,7 +254,7 @@ class AgentWorker(object):
                 for i in range(int(math.ceil(expBatch.shape[0] / float(batchSize)))):
                     v, _ = self.localNetwork.predict(nextStates[i*batchSize: (i+1)*batchSize, ...], session)
                     values.append(v)
-                values = np.stack(values).reshape(-1)
+                values = np.concatenate(values).reshape(-1)
                 # The target values
                 targetValues = rewards + values * discountFactor * terminates
                 # Update
