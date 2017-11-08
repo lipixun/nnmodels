@@ -249,8 +249,11 @@ class AgentWorker(object):
                 nextStates = np.stack(expBatch[:, 1])
                 rewards = np.stack(expBatch[:, 3])
                 terminates = np.invert(expBatch[:, 4].astype(np.bool)).astype(np.float32)   # pylint: disable=no-member
-                values, _ = self.localNetwork.predict(nextStates, session)
-                values = values.reshape(-1)
+                values = []
+                for i in range(int(math.ceil(expBatch.shape[0] / float(batchSize)))):
+                    v, _ = self.localNetwork.predict(nextStates[i*batchSize: (i+1)*batchSize, ...], session)
+                    values.append(v)
+                values = np.stack(values).reshape(-1)
                 # The target values
                 targetValues = rewards + values * discountFactor * terminates
                 # Update
