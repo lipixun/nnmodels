@@ -133,16 +133,14 @@ class ExperienceBuffer(object):
 #
 # NOTE:
 #   The `Policy Graph` here is `mainQN` in the original codes
-#   The `Value Graph` here is `targetQN` in the original codes
 #
 
-def buildValueGraphUpdateOp(policyGraphVars, targetGraphVars):
+def buildTargetGraphUpdateOp(policyGraphVars, targetGraphVars):
     """Build the update op of value graph
     """
     ops = []
     for i, var in enumerate(policyGraphVars):
         ops.append(tf.assign(targetGraphVars[i], var))
-    # Group all operations together and return
     return tf.group(*ops)
 
 if __name__ == "__main__":
@@ -178,16 +176,16 @@ if __name__ == "__main__":
             os.makedirs(args.writeGIFPath)
         # Create environments
         envs = [GameEnv(False, args.gridSize) for _ in range(args.envNums)]
-        expBuffer = ExperienceBuffer(size=100000)
+        expBuffer = ExperienceBuffer(size=1000000)
         # Create networks
         with tf.variable_scope("policy") as scope:
             policyGraph = QNetwork(envs[0].actions)
             policyGraphVars = tf.contrib.framework.get_variables(scope, collection=tf.GraphKeys.GLOBAL_VARIABLES)
-        with tf.variable_scope("value") as scope:
+        with tf.variable_scope("target") as scope:
             targetGraph = QNetwork(envs[0].actions)
             targetGraphVars = tf.contrib.framework.get_variables(scope, collection=tf.GraphKeys.GLOBAL_VARIABLES)
             # Get the update op of value graph
-            targetGraphUpdateOp = buildValueGraphUpdateOp(policyGraphVars, targetGraphVars)
+            targetGraphUpdateOp = buildTargetGraphUpdateOp(policyGraphVars, targetGraphVars)
         # Variables
         e = args.eStart
         gStep = 0
@@ -241,18 +239,20 @@ if __name__ == "__main__":
                     states = np.stack(newStates)
                 gRewards.extend(epochRewards)
                 # Update network
-                if gStep > args.preTrainSteps and len(expBuffer) >= args.batchSize:
-                    exps = expBuffer.sample(args.batchSize)
-                    # Calculate the target rewards
-                    nextStates = np.stack(exps[:, 1])
-                    policyPreds, _ = policyGraph.predict(nextStates, session)
-                    _, valueOuts = targetGraph.predict(nextStates, session)
-                    terminateFactor = np.invert(exps[:, 4].astype(np.bool)).astype(np.float32)    # pylint: disable=no-member
-                    targetQ = exps[:, 3] + (valueOuts[range(args.batchSize), policyPreds] * args.discountFactor * terminateFactor)
-                    # Update policy network
-                    loss = policyGraph.update(np.stack(exps[:, 0]), targetQ, exps[:, 2], session)
-                    # Add loss
-                    gLosses.append(loss)
+                if gStep > args.preTrainSteps and len(expBuffer) >= args.batchSize * args.envNums:
+                    expBatches = expBuffer.sample(args.batchSize * args.envNums)
+                    for i in range(args.envNums):
+                        exps = expBatches[i*args.batchSize: (i+1)*args.batchSize, ...]
+                        # Calculate the target rewards
+                        nextStates = np.stack(exps[:, 1])
+                        policyPreds, _ = policyGraph.predict(nextStates, session)
+                        _, valueOuts = targetGraph.predict(nextStates, session)
+                        terminateFactor = np.invert(exps[:, 4].astype(np.bool)).astype(np.float32)    # pylint: disable=no-member
+                        targetQ = exps[:, 3] + (valueOuts[range(args.batchSize), policyPreds] * args.discountFactor * terminateFactor)
+                        # Update policy network
+                        loss = policyGraph.update(np.stack(exps[:, 0]), targetQ, exps[:, 2], session)
+                        # Add loss
+                        gLosses.append(loss)
                 # Save gifs
                 if Clip and args.writeGIFEpisodes and episode % args.writeGIFEpisodes == 0:
                     clip = Clip(imageBuffer, fps=1)
