@@ -152,7 +152,8 @@ if __name__ == "__main__":
         """
         parser = ArgumentParser(description="GridWorld DQN")
         parser.add_argument("--pretrain-steps", dest="preTrainSteps", type=int, default=100, help="The pre-train steps")
-        parser.add_argument("--update-target-network-steps", dest="updateTargetNetworkSteps", type=int, default=10000, help="The step interval used to update target network")
+        parser.add_argument("--update-policy-episodes", dest="updatePolicyEpisodes", type=int, default=4, help="The episode interval used to update policy graph")
+        parser.add_argument("--update-target-episodes", dest="updateTargetEpisodes", type=int, default=80, help="The episode interval used to update target network")
         parser.add_argument("--discount-factor", dest="discountFactor", type=float, default=0.99, help="The discount factor")
         parser.add_argument("--batch-size", dest="batchSize", default=256, help="The batch size")
         parser.add_argument("--max-epoch", dest="maxEpoch", type=int, default=100, help="The max epoch")
@@ -211,9 +212,6 @@ if __name__ == "__main__":
                 while epoch < args.maxEpoch:
                     gStep += 1
                     epoch += 1
-                    # Check update target network or not
-                    if gStep % args.updateTargetNetworkSteps == 0:
-                        session.run(targetGraphUpdateOp)
                     # Choose actions (By e-greedy)
                     if gStep < args.preTrainSteps or np.random.rand(1) < e:     # pylint: disable=no-member
                         actions = [np.random.randint(0, envs[0].actions) for _ in envs]   # pylint: disable=no-member
@@ -238,8 +236,8 @@ if __name__ == "__main__":
                         break
                     states = np.stack(newStates)
                 gRewards.extend(epochRewards)
-                # Update network
-                if gStep > args.preTrainSteps and len(expBuffer) >= args.batchSize * args.envNums:
+                # Update policy network
+                if gStep > args.preTrainSteps and episode % args.updatePolicyEpisodes == 0 and len(expBuffer) >= args.batchSize * args.envNums:
                     expBatches = expBuffer.sample(args.batchSize * args.envNums)
                     for i in range(args.envNums):
                         exps = expBatches[i*args.batchSize: (i+1)*args.batchSize, ...]
@@ -253,6 +251,9 @@ if __name__ == "__main__":
                         loss = policyGraph.update(np.stack(exps[:, 0]), targetQ, exps[:, 2], session)
                         # Add loss
                         gLosses.append(loss)
+                # Update target network
+                if episode % args.updateTargetEpisodes == 0:
+                    session.run(targetGraphUpdateOp)
                 # Save gifs
                 if Clip and args.writeGIFEpisodes and episode % args.writeGIFEpisodes == 0:
                     clip = Clip(imageBuffer, fps=1)
