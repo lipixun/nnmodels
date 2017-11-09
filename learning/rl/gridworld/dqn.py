@@ -180,6 +180,7 @@ if __name__ == "__main__":
         expBuffer = ExperienceBuffer(size=1000000)
         # Create networks
         with tf.variable_scope("policy") as scope:
+            # NOTE: Even if I named this graph `PolicyGraph`, it has no relation to `Policy Gradient`, this is a classical `Deep Q-Network`
             policyGraph = QNetwork(envs[0].actions)
             policyGraphVars = tf.contrib.framework.get_variables(scope, collection=tf.GraphKeys.GLOBAL_VARIABLES)
         with tf.variable_scope("target") as scope:
@@ -241,7 +242,7 @@ if __name__ == "__main__":
                     expBatches = expBuffer.sample(args.batchSize * args.envNums)
                     for i in range(args.envNums):
                         exps = expBatches[i*args.batchSize: (i+1)*args.batchSize, ...]
-                        # Calculate the target rewards
+                        # Calculate the target q
                         nextStates = np.stack(exps[:, 1])
                         policyPreds, _ = policyGraph.predict(nextStates, session)
                         _, valueOuts = targetGraph.predict(nextStates, session)
