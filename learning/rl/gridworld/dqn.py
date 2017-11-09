@@ -10,11 +10,19 @@
 
 """
 
+import os
+import os.path
 import random
+import shutil
 
 import numpy as np
 import tfutils
 import tensorflow as tf
+
+try:
+    from moviepy.editor import ImageSequenceClip as Clip
+except ImportError:
+    Clip = None
 
 from gridworld import GameEnv, ImageSize, ImageDepth
 
@@ -155,12 +163,19 @@ if __name__ == "__main__":
         parser.add_argument("--e-reduce-steps", dest="eReduceSteps", type=int, default=1e7, help="The e reduce step number")
         parser.add_argument("--grid-size", dest="gridSize", type=int, default=5, help="The grid size")
         parser.add_argument("-e", "--env-nums", dest="envNums", type=int, default=64, help="The number of grid envs that is observed at the same time")
+        parser.add_argument("--write-gif-path", dest="writeGIFPath", default="output-gifs", help="The generated gif images")
+        parser.add_argument("--write-gif-episodes", dest="writeGIFEpisodes", type=int, default=100, help="The number of episode to write a gif")
         return parser.parse_args()
 
     def main():
         """The main entry
         """
         args = getArguments()
+        # Check images
+        if Clip and args.writeGIFEpisodes:
+            if os.path.isdir(args.writeGIFPath):
+                shutil.rmtree(args.writeGIFPath)
+            os.makedirs(args.writeGIFPath)
         # Create environments
         envs = [GameEnv(False, args.gridSize) for _ in range(args.envNums)]
         expBuffer = ExperienceBuffer(size=100000)
@@ -193,12 +208,13 @@ if __name__ == "__main__":
                 for env in envs:
                     states.append(env.reset())
                 states = np.stack(states)
+                imageBuffer = [states[0]]
                 # Run
                 while epoch < args.maxEpoch:
                     gStep += 1
                     epoch += 1
                     # Check update target network or not
-                    if gStep % args.updateTargetNetworkSteps:
+                    if gStep % args.updateTargetNetworkSteps == 0:
                         session.run(targetGraphUpdateOp)
                     # Choose actions (By e-greedy)
                     if gStep < args.preTrainSteps or np.random.rand(1) < e:     # pylint: disable=no-member
@@ -213,6 +229,8 @@ if __name__ == "__main__":
                         s, r, t = envs[i].step(action)
                         expBuffer.add(np.array([states[i], s, action, r, t]))    # Force terminated at the end of max epoch length
                         newStates.append(s)
+                        if i == 0:
+                            imageBuffer.append(s)
                         if not t:
                             epochRewards[i] += r
                             allTerminated = False
@@ -226,14 +244,19 @@ if __name__ == "__main__":
                 if gStep > args.preTrainSteps and len(expBuffer) >= args.batchSize:
                     exps = expBuffer.sample(args.batchSize)
                     # Calculate the target rewards
-                    policyPreds, _ = policyGraph.predict(np.stack(exps[:, 1]), session)
-                    _, valueOuts = targetGraph.predict(np.stack(exps[:, 1]), session)
+                    nextStates = np.stack(exps[:, 1])
+                    policyPreds, _ = policyGraph.predict(nextStates, session)
+                    _, valueOuts = targetGraph.predict(nextStates, session)
                     terminateFactor = np.invert(exps[:, 4].astype(np.bool)).astype(np.float32)    # pylint: disable=no-member
                     targetQ = exps[:, 3] + (valueOuts[range(args.batchSize), policyPreds] * args.discountFactor * terminateFactor)
                     # Update policy network
                     loss = policyGraph.update(np.stack(exps[:, 0]), targetQ, exps[:, 2], session)
                     # Add loss
                     gLosses.append(loss)
+                # Save gifs
+                if Clip and args.writeGIFEpisodes and episode % args.writeGIFEpisodes == 0:
+                    clip = Clip(imageBuffer, fps=1)
+                    clip.write_gif(os.path.join(args.writeGIFPath, "episode-%d.gif" % episode), fps=1)
                 # Show metrics
                 if episode % 100 == 0:
                     print "Episode [%d] Global Step [%d] E[%.4f] | Latest 100 Episodes: Mean Loss [%f] Reward Mean [%.4f] Var [%.4f]" % (episode, gStep, e, np.mean(gLosses), np.mean(gRewards), np.var(gRewards))
