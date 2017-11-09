@@ -198,6 +198,8 @@ if __name__ == "__main__":
         with tf.Session(config=tfutils.session.newConfigProto(0.25)) as session:
             # Init all variables
             session.run(tf.global_variables_initializer())
+            # Update the target graph at the beginning of training
+            session.run(targetGraphUpdateOp)
             episode = 0
             while True:
                 episode += 1
