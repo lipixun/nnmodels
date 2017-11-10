@@ -63,7 +63,7 @@ class AgentWorker(object):
             print >>sys.stderr, "Worker [%s] starts with name [%s] environment [%s] nums [%d]" % (self.id, self.name, self.envName, self.envNums)
         try:
             # Start server
-            server = tf.train.Server(self.clusterSpec, "worker", self.taskIndex, config=tfutils.session.newConfigProto(1e-2))
+            server = tf.train.Server(self.clusterSpec, "worker", self.taskIndex, config=tfutils.session.newConfigProto(self.gpuMemoryFraction))
             # Prepare environments
             envs = EnvGroup(self.envName, self.envNums)
             # Create network
@@ -133,8 +133,9 @@ class AgentWorker(object):
                 nextStates = np.concatenate([exp[1] for exp in exps])
                 rewards = np.concatenate([exp[3] for exp in exps])
                 terminates = np.invert(np.concatenate([exp[4] for exp in exps])).astype(np.float32)   # pylint: disable=no-member
+                count = states.shape[0]
                 values = []
-                for i in range(int(math.ceil(len(exps) / float(batchSize)))):
+                for i in range(int(math.ceil(count / float(batchSize)))):
                     v, _ = network.predict(nextStates[i*batchSize: (i+1)*batchSize, ...], session)
                     values.append(v)
                 values = np.concatenate(values).reshape(-1)
@@ -142,7 +143,7 @@ class AgentWorker(object):
                 targetValues = rewards + values * discountFactor * terminates   # NOTE: 1-step return
                 # Update
                 losses = []
-                for i in range(int(math.ceil(len(exps) / float(batchSize)))):
+                for i in range(int(math.ceil(count / float(batchSize)))):
                     loss = network.update(states[i*batchSize: (i+1)*batchSize, :], actions[i*batchSize: (i+1)*batchSize], targetValues[i*batchSize: (i+1)*batchSize], session)
                     losses.append(loss)
                 loss = np.mean(losses)
