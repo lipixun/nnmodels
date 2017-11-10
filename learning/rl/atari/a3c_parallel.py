@@ -41,7 +41,7 @@ eStepReduceValue = float(eStart - eEnd) / float(eReduceStepNum)
 class AgentWorker(object):
     """The agent worker
     """
-    def __init__(self, _id, name, envName, envNums, clusterSpec, taskIndex, writeLock, stopEvent, gpuMemFaction, gifPath, gifEpisode):
+    def __init__(self, _id, name, envName, envNums, clusterSpec, taskIndex, writeLock, stopEvent, gpuMemoryFraction, gifPath, gifEpisode):
         """Create a new AgentWorker
         """
         self.id = _id
@@ -52,7 +52,7 @@ class AgentWorker(object):
         self.taskIndex = taskIndex
         self.writeLock = writeLock
         self.stopEvent = stopEvent
-        self.gpuMemFaction = gpuMemFaction
+        self.gpuMemoryFraction = gpuMemoryFraction
         self.gifPath = gifPath
         self.gifEpisode = gifEpisode
 
@@ -63,14 +63,14 @@ class AgentWorker(object):
             print >>sys.stderr, "Worker [%s] starts with name [%s] environment [%s] nums [%d]" % (self.id, self.name, self.envName, self.envNums)
         try:
             # Start server
-            server = tf.train.Server(self.clusterSpec, "worker", self.taskIndex)
+            server = tf.train.Server(self.clusterSpec, "worker", self.taskIndex, config=tfutils.session.newConfigProto(1e-2))
             # Prepare environments
             envs = EnvGroup(self.envName, self.envNums)
             # Create network
             with tf.device(tf.train.replica_device_setter(worker_device="/job:worker/task:%d" % self.taskIndex, cluster=self.clusterSpec)):
                 network = A3CNetwork(self.name, envs.actionNums)
             # Init session
-            with tf.train.MonitoredTrainingSession(master=server.target, is_chief=self.taskIndex == 0, config=tfutils.session.newConfigProto(self.gpuMemFaction)) as session:
+            with tf.train.MonitoredTrainingSession(master=server.target, is_chief=self.taskIndex == 0, config=tfutils.session.newConfigProto(self.gpuMemoryFraction)) as session:
                 self.train(envs, network, session)
         finally:
             with self.writeLock:
@@ -163,17 +163,18 @@ class AgentWorker(object):
 class ParameterServer(object):
     """The parameter server
     """
-    def __init__(self, clusterSpec, taskIndex, stopEvent):
+    def __init__(self, clusterSpec, taskIndex, stopEvent, gpuMemoryFraction):
         """Create a new ParameterServer
         """
         self.clusterSpec = clusterSpec
         self.taskIndex = taskIndex
         self.stopEvent = stopEvent
+        self.gpuMemoryFraction = gpuMemoryFraction
 
     def __call__(self):
         """Run this server
         """
-        server = tf.train.Server(self.clusterSpec, "ps", self.taskIndex)
+        server = tf.train.Server(self.clusterSpec, "ps", self.taskIndex, config=tfutils.session.newConfigProto(self.gpuMemoryFraction))
         server.start()
         # Wait stop
         self.stopEvent.wait()
@@ -189,7 +190,7 @@ if __name__ == "__main__":
         parser.add_argument("-p", "--parallel", dest="parallel", type=int, default=6, help="The parallel worker number. Will use all cpu cores if not specified")
         parser.add_argument("-n", "--name", dest="name", default="Breakout-v0", help="The game env name")
         parser.add_argument("-e", "--env-num-per-worker", dest="envNumPerWorker", type=int, default=64, help="The environment number per worker")
-        parser.add_argument("-g", "--gpu-memory-faction", dest="gpuMemoryFaction", type=float, default=0.1, help="The gpu memory faction per worker")
+        parser.add_argument("-g", "--gpu-memory-fraction", dest="gpuMemoryFraction", type=float, default=0.1, help="The gpu memory faction per worker")
         parser.add_argument("--port-start-from", dest="portStartFrom", type=int, default=51234, help="The port start from")
         parser.add_argument("--write-gif-path", dest="writeGIFPath", default="output-gifs", help="The generated gif images")
         parser.add_argument("--write-gif-episodes", dest="writeGIFEpisodes", type=int, default=100, help="The number of episode to write a gif")
@@ -216,11 +217,11 @@ if __name__ == "__main__":
             clusterSpec = tf.train.ClusterSpec({"ps": psAddrs, "worker": workerAddrs})
             # Start servers
             processes = []
-            process = multiprocessing.Process(target=ParameterServer(clusterSpec, 0, stopEvent))
+            process = multiprocessing.Process(target=ParameterServer(clusterSpec, 0, stopEvent, args.gpuMemoryFraction))
             process.start()
             processes.append(process)
             for i in range(args.parallel):
-                process = multiprocessing.Process(target=AgentWorker(i, "main", args.name, args.envNumPerWorker, clusterSpec, i, writeLock, stopEvent, args.gpuMemoryFaction, args.writeGIFPath, args.writeGIFEpisodes))
+                process = multiprocessing.Process(target=AgentWorker(i, "main", args.name, args.envNumPerWorker, clusterSpec, i, writeLock, stopEvent, args.gpuMemoryFraction, args.writeGIFPath, args.writeGIFEpisodes))
                 process.start()
                 processes.append(process)
             # Wait and exit
