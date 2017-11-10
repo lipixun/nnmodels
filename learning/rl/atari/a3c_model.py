@@ -62,9 +62,9 @@ class A3CNetwork(object):
                 #
                 self.trainer = tf.train.AdamOptimizer(learning_rate=1e-3, use_locking=True)
                 if globalVars:
-                    self.updateop = trainer.apply_gradients(zip(grads, globalVars))
+                    self.updateop = self.trainer.apply_gradients(zip(grads, globalVars))
                 else:
-                    self.updateop = trainer.apply_gradients(zip(grads, self.trainableVars))
+                    self.updateop = self.trainer.apply_gradients(zip(grads, self.trainableVars))
 
     def conv2d(self, inp, filters, ksize, strides):
         """Conv 2d
