@@ -33,6 +33,7 @@ class QNetwork(object):
         """Create a new QNetwork
         """
         self.state = tf.placeholder(tf.float32, [None, ImageSize, ImageSize, ImageDepth])
+        self.temperature = tf.placeholder(tf.float32, [])
         # Apply cnn layers
         with tf.variable_scope("cnn-0"):
             cnn0 = self.conv2d(self.state, 32, [8, 8], [1, 4, 4, 1])
@@ -55,6 +56,7 @@ class QNetwork(object):
                 advantage = self.fc(fcOut, actionNums)
         # Output
         self.outputQ = value + advantage - tf.reduce_mean(advantage, axis=1, keep_dims=True)
+        self.outputQDist = tf.nn.softmax(self.outputQ / self.temperature)
         self.prediction = tf.argmax(self.outputQ, axis=1)
         #
         # Train method
@@ -83,10 +85,10 @@ class QNetwork(object):
             out = act(out)
         return out
 
-    def predict(self, states, session):
+    def predict(self, states, t, session):
         """Predict
         """
-        return session.run([self.prediction, self.outputQ], feed_dict={self.state: states})
+        return session.run([self.prediction, self.outputQ, self.outputQDist], feed_dict={self.state: states, self.temperature: t})
 
     def update(self, states, targetQ, actions, session):
         """Update the model
@@ -159,7 +161,7 @@ if __name__ == "__main__":
         parser.add_argument("--max-epoch", dest="maxEpoch", type=int, default=100, help="The max epoch")
         parser.add_argument("--e-start", dest="eStart", type=float, default=1.0, help="The e start")
         parser.add_argument("--e-end", dest="eEnd", type=float, default=0.1, help="The e end")
-        parser.add_argument("--e-reduce-steps", dest="eReduceSteps", type=int, default=1e7, help="The e reduce step number")
+        parser.add_argument("--e-reduce-steps", dest="eReduceSteps", type=int, default=1e6, help="The e reduce step number")
         parser.add_argument("--grid-size", dest="gridSize", type=int, default=5, help="The grid size")
         parser.add_argument("-e", "--env-nums", dest="envNums", type=int, default=64, help="The number of grid envs that is observed at the same time")
         parser.add_argument("--write-gif-path", dest="writeGIFPath", default="output-gifs", help="The generated gif images")
@@ -176,7 +178,7 @@ if __name__ == "__main__":
                 shutil.rmtree(args.writeGIFPath)
             os.makedirs(args.writeGIFPath)
         # Create environments
-        envs = [GameEnv(False, args.gridSize) for _ in range(args.envNums)]
+        envs = [GameEnv(False, args.gridSize, -1.0) for _ in range(args.envNums)]
         expBuffer = ExperienceBuffer(size=1000000)
         # Create networks
         with tf.variable_scope("policy") as scope:
@@ -216,16 +218,19 @@ if __name__ == "__main__":
                     gStep += 1
                     epoch += 1
                     # Choose actions (By e-greedy)
-                    if gStep < args.preTrainSteps or np.random.rand(1) < e:     # pylint: disable=no-member
-                        actions = [np.random.randint(0, envs[0].actions) for _ in envs]   # pylint: disable=no-member
+                    if gStep < args.preTrainSteps or np.random.rand(1) < e:                 # pylint: disable=no-member
+                        actions = [np.random.randint(0, envs[0].actions) for _ in envs]     # pylint: disable=no-member
                     else:
-                        actions, _ = policyGraph.predict(states, session)
-                        actions = actions.reshape(-1)
+                        _, _, outputQDist = policyGraph.predict(states, 1.0, session)
+                        actions = []
+                        for i in range(outputQDist.shape[0]):
+                            actions.append(np.random.choice(outputQDist.shape[1], size=1, p=outputQDist[i]))    # pylint: disable=no-member
+                        actions = np.array(actions)
                     # Execute the environment
                     newStates = []
                     allTerminated = True
                     for i, action in enumerate(actions):
-                        s, r, t = envs[i].step(action)
+                        s, r, t, _ = envs[i].step(action)
                         expBuffer.add(np.array([states[i], s, action, r, t]))    # Force terminated at the end of max epoch length
                         newStates.append(s)
                         if i == 0:
@@ -246,8 +251,8 @@ if __name__ == "__main__":
                         exps = expBatches[i*args.batchSize: (i+1)*args.batchSize, ...]
                         # Calculate the target q
                         nextStates = np.stack(exps[:, 1])
-                        policyPreds, _ = policyGraph.predict(nextStates, session)
-                        _, valueOuts = targetGraph.predict(nextStates, session)
+                        policyPreds, _, _ = policyGraph.predict(nextStates, 1.0, session)
+                        _, valueOuts, _ = targetGraph.predict(nextStates, 1.0, session)
                         terminateFactor = np.invert(exps[:, 4].astype(np.bool)).astype(np.float32)    # pylint: disable=no-member
                         targetQ = exps[:, 3] + (valueOuts[range(args.batchSize), policyPreds] * args.discountFactor * terminateFactor)
                         # Update policy network
