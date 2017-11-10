@@ -157,7 +157,7 @@ if __name__ == "__main__":
         parser.add_argument("--update-policy-episodes", dest="updatePolicyEpisodes", type=int, default=4, help="The episode interval used to update policy graph")
         parser.add_argument("--update-target-episodes", dest="updateTargetEpisodes", type=int, default=80, help="The episode interval used to update target network")
         parser.add_argument("--discount-factor", dest="discountFactor", type=float, default=0.99, help="The discount factor")
-        parser.add_argument("--batch-size", dest="batchSize", default=256, help="The batch size")
+        parser.add_argument("--batch-size", dest="batchSize", type=int, default=256, help="The batch size")
         parser.add_argument("--max-epoch", dest="maxEpoch", type=int, default=100, help="The max epoch")
         parser.add_argument("--e-start", dest="eStart", type=float, default=1.0, help="The e start")
         parser.add_argument("--e-end", dest="eEnd", type=float, default=0.1, help="The e end")
