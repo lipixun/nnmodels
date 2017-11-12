@@ -178,7 +178,7 @@ if __name__ == "__main__":
                 shutil.rmtree(args.writeGIFPath)
             os.makedirs(args.writeGIFPath)
         # Create environments
-        envs = [GameEnv(False, args.gridSize, -1.0) for _ in range(args.envNums)]
+        envs = [GameEnv(False, args.gridSize) for _ in range(args.envNums)]
         expBuffer = ExperienceBuffer(size=100000)
         # Create networks
         with tf.variable_scope("policy") as scope:
