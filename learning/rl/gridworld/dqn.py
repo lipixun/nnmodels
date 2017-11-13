@@ -46,12 +46,12 @@ class QNetwork(object):
         # Duel-DQN
         with tf.variable_scope("value"):
             with tf.variable_scope("fc"):
-                fcOut = self.fc(cnnOut, 512, tf.nn.relu)
+                fcOut = self.fc(cnnOut, 512, tf.nn.tanh)
             with tf.variable_scope("out"):
                 value = self.fc(fcOut, 1)
         with tf.variable_scope("advantage"):
             with tf.variable_scope("fc"):
-                fcOut = self.fc(cnnOut, 512, tf.nn.relu)
+                fcOut = self.fc(cnnOut, 512, tf.nn.tanh)
             with tf.variable_scope("out"):
                 advantage = self.fc(fcOut, actionNums)
         # Output
@@ -178,7 +178,7 @@ if __name__ == "__main__":
                 shutil.rmtree(args.writeGIFPath)
             os.makedirs(args.writeGIFPath)
         # Create environments
-        envs = [GameEnv(False, args.gridSize) for _ in range(args.envNums)]
+        envs = [GameEnv(False, args.gridSize, stepCost=-1e-3) for _ in range(args.envNums)]
         expBuffer = ExperienceBuffer(size=100000)
         # Create networks
         with tf.variable_scope("policy") as scope:
