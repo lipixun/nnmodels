@@ -48,10 +48,10 @@ class CoreNet(object):
             # 3-fc layers
             with tf.variable_scope("fc-0"):
                 fc0 = self.fc(tf.reshape(self.images, [-1, ImageSize * ImageSize * ImageDepth]), 2000, tf.nn.relu)
-            with tf.variable_scope("fc-0"):
-                fc1 = self.fc(tf.reshape(fc0, [-1, ImageSize * ImageSize * ImageDepth]), 1000, tf.nn.relu)
-            with tf.variable_scope("fc-0"):
-                fc2 = self.fc(tf.reshape(fc1, [-1, ImageSize * ImageSize * ImageDepth]), 1000, tf.nn.relu)
+            with tf.variable_scope("fc-1"):
+                fc1 = self.fc(fc0, 1000, tf.nn.relu)
+            with tf.variable_scope("fc-2"):
+                fc2 = self.fc(fc1, 1000, tf.nn.relu)
             hout = fc2
         if duel:
             # Duel-DQN
@@ -182,7 +182,7 @@ class SimpleQNetwork(QNetwork):
         Returns:
             np.array: The q values in 1d-array
         """
-        return session.run(self.net.q, feed_dict={self.net.images: images})
+        return session.run(self.net.q, feed_dict={self.net.images: images}).max(axis=1)
 
     def update(self, episode, images, actions, targetQ, session, t=1.0):
         """Update
@@ -353,9 +353,9 @@ if __name__ == "__main__":
         expBuffer = ExperienceBuffer(size=args.bufferSize)
         # Create network
         if args.double:
-            net = SimpleQNetwork(actionNums, cnn=args.cnn, duel=args.duel, huberLoss=args.huber)
-        else:
             net = DoubleQNetwork(actionNums, cnn=args.cnn, duel=args.duel, huberLoss=args.huber, updateIntervalEpisode=args.updateTargetEpisodes)
+        else:
+            net = SimpleQNetwork(actionNums, cnn=args.cnn, duel=args.duel, huberLoss=args.huber)
         # Variables
         e = args.eStart
         gStep = 0
@@ -385,12 +385,12 @@ if __name__ == "__main__":
                     gStep += 1
                     epoch += 1
                     # Choose actions (By e-greedy)
-                    if gStep < args.preTrainSteps or np.random.rand(1) < e:                 # pylint: disable=no-member
+                    if episode < args.preTrainEpisodes or np.random.rand(1) < e:                 # pylint: disable=no-member
                         # By random
                         actions = [np.random.randint(0, envs[0].actions) for _ in envs]     # pylint: disable=no-member
                     else:
                         # By boltzmann
-                        _, _, qdist = net.predict(states, 1.0, session)
+                        _, _, qdist = net.predict(states, session)
                         actions = []
                         for i in range(qdist.shape[0]):
                             actions.append(np.random.choice(qdist.shape[1], size=1, p=qdist[i]))    # pylint: disable=no-member
