@@ -380,6 +380,7 @@ if __name__ == "__main__":
                     states.append(env.reset())
                 states = np.stack(states)
                 imageBuffer = [states[0]]
+                qBuffer = []
                 # Run
                 while epoch < args.maxEpoch:
                     gStep += 1
@@ -388,11 +389,14 @@ if __name__ == "__main__":
                     if episode < args.preTrainEpisodes or np.random.rand(1) < e:                 # pylint: disable=no-member
                         # By random
                         actions = [np.random.randint(0, envs[0].actions) for _ in envs]     # pylint: disable=no-member
+                        qBuffer.append("random")
                     else:
                         # By boltzmann
-                        _, _, qdist = net.predict(states, session)
+                        _, q, qdist = net.predict(states, session)
                         actions = []
                         for i in range(qdist.shape[0]):
+                            if i == 0:
+                                qBuffer.append(q[0].tolist())
                             actions.append(np.random.choice(qdist.shape[1], size=1, p=qdist[i]))    # pylint: disable=no-member
                         actions = np.array(actions)
                     # Execute the environment
@@ -430,6 +434,9 @@ if __name__ == "__main__":
                 if Clip and args.writeGIFEpisodes and episode % args.writeGIFEpisodes == 0:
                     clip = Clip(imageBuffer, fps=1)
                     clip.write_gif(os.path.join(args.writeGIFPath, "episode-%d.gif" % episode), fps=1)
+                    with open(os.path.join(args.writeGIFPath, "episode-%d.q" % episode), "wb") as fd:
+                        for q in qBuffer:
+                            print >>fd, q if isinstance(q, str) else "    ".join(["%.6f" % x for x in q])
                 # Show metrics
                 if episode % 100 == 0:
                     print "Episode [%d] Global Step [%d] E[%.4f] | Latest 100 Episodes: Mean Loss [%f] Reward Mean [%.4f] Var [%.4f]" % (episode, gStep, e, np.mean(gLosses), np.mean(gRewards), np.var(gRewards))
