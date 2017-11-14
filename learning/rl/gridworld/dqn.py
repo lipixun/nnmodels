@@ -39,6 +39,7 @@ class CoreNet(object):
             # 3-conv layers
             with tf.variable_scope("cnn-0"):
                 cnn0 = self.conv2d(self.images, 32, [8, 8], [1, 4, 4, 1])
+                #cnn0 = tf.nn.max_pool(cnn0, [1, 2, 2, 1], [1, 1, 1, 1], padding="SAME")
             with tf.variable_scope("cnn-1"):
                 cnn1 = self.conv2d(cnn0, 64, [4, 4], [1, 2, 2, 1])
             with tf.variable_scope("cnn-2"):
@@ -320,16 +321,16 @@ if __name__ == "__main__":
         parser.add_argument("--huber", dest="huber", action="store_true", help="Use huber loss instead of square loss")
         parser.add_argument("--duel", dest="duel", action="store_true", help="Use duel-DQN")
         parser.add_argument("--double", dest="double", action="store_true", help="Use double-DQN")
-        parser.add_argument("--pretrain-episodes", dest="preTrainEpisodes", type=int, default=10, help="The pre-train episodes before running training")
-        parser.add_argument("--buffer-size", dest="bufferSize", type=int, default=int(1e5), help="The buffer size")  # Make this too large will consume too much memory
+        parser.add_argument("--pretrain-episodes", dest="preTrainEpisodes", type=int, default=1e2, help="The pre-train episodes before running training")
+        parser.add_argument("--buffer-size", dest="bufferSize", type=int, default=int(1e6), help="The buffer size")  # Make this too large will consume too much memory
         parser.add_argument("--update-policy-episodes", dest="updatePolicyEpisodes", type=int, default=4, help="The episode interval used to update policy graph")
         parser.add_argument("--update-target-episodes", dest="updateTargetEpisodes", type=int, default=1e2, help="The episode interval used to update target network (Only available in Double-DQN)")
         parser.add_argument("--discount-factor", dest="discountFactor", type=float, default=0.99, help="The discount factor")
         parser.add_argument("--batch-size", dest="batchSize", type=int, default=256, help="The batch size")
         parser.add_argument("--max-epoch", dest="maxEpoch", type=int, default=1e2, help="The max epoch")
         parser.add_argument("--e-start", dest="eStart", type=float, default=1.0, help="The e start")
-        parser.add_argument("--e-end", dest="eEnd", type=float, default=0.1, help="The e end")
-        parser.add_argument("--e-reduce-steps", dest="eReduceSteps", type=int, default=1e6, help="The e reduce step number")
+        parser.add_argument("--e-end", dest="eEnd", type=float, default=5e-2, help="The e end")
+        parser.add_argument("--e-reduce-steps", dest="eReduceSteps", type=int, default=1e7, help="The e reduce step number")
         parser.add_argument("-e", "--env-nums", dest="envNums", type=int, default=16, help="The number of grid envs that is observed at the same time")
         parser.add_argument("--grid-size", dest="gridSize", type=int, default=5, help="The grid size")
         parser.add_argument("--outside-reward", dest="outsideReward", type=float, default=0.0, help="The reword when move to outside")
