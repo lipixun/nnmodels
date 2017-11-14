@@ -91,14 +91,14 @@ class CoreNet(object):
     def conv2d(self, inp, filters, ksize, strides):
         """Conv 2d
         """
-        W = tf.get_variable("W", list(ksize) + [inp.shape[-1], filters], tf.float32, tf.random_normal_initializer())
+        W = tf.get_variable("W", list(ksize) + [inp.shape[-1], filters], tf.float32, tf.truncated_normal_initializer(stddev=1e-2))
         b = tf.get_variable("b", [filters], tf.float32, tf.zeros_initializer())
         return tf.nn.relu(tf.nn.bias_add(tf.nn.conv2d(inp, W, strides, "VALID"), b))
 
     def fc(self, inp, size, act=None):
         """Add a full connected layer
         """
-        W = tf.get_variable("W", [inp.shape[-1].value, size], tf.float32, tf.random_normal_initializer())
+        W = tf.get_variable("W", [inp.shape[-1].value, size], tf.float32, tf.truncated_normal_initializer(stddev=1e-2))
         b = tf.get_variable("b", [size], tf.float32, tf.zeros_initializer())
         out = tf.nn.xw_plus_b(inp, W, b)
         if act:
@@ -381,6 +381,7 @@ if __name__ == "__main__":
                 states = np.stack(states)
                 imageBuffer = [states[0]]
                 qBuffer = []
+                rBuffer = []
                 # Run
                 while epoch < args.maxEpoch:
                     gStep += 1
@@ -407,6 +408,7 @@ if __name__ == "__main__":
                         expBuffer.add(np.array([states[i], s, action, r, t]))    # Force terminated at the end of max epoch length
                         newStates.append(s)
                         if i == 0:
+                            rBuffer.append(r)
                             imageBuffer.append(s)
                         if not t:
                             epochRewards[i] += r
@@ -435,8 +437,8 @@ if __name__ == "__main__":
                     clip = Clip(imageBuffer, fps=1)
                     clip.write_gif(os.path.join(args.writeGIFPath, "episode-%d.gif" % episode), fps=1)
                     with open(os.path.join(args.writeGIFPath, "episode-%d.q" % episode), "wb") as fd:
-                        for q in qBuffer:
-                            print >>fd, q if isinstance(q, str) else "    ".join(["%.6f" % x for x in q])
+                        for i, q in enumerate(qBuffer):
+                            print >>fd, q if isinstance(q, str) else "    ".join(["%.6f" % x for x in q]), "Reward:", rBuffer[i]
                 # Show metrics
                 if episode % 100 == 0:
                     print "Episode [%d] Global Step [%d] E[%.4f] | Latest 100 Episodes: Mean Loss [%f] Reward Mean [%.4f] Var [%.4f]" % (episode, gStep, e, np.mean(gLosses), np.mean(gRewards), np.var(gRewards))

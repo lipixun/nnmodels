@@ -95,7 +95,7 @@ class GameEnv(object):
                     self.objects.append(GameOb(self.newPosition(), 1, 1, 1, 1, "goal"))
                 else:
                     self.objects.append(GameOb(self.newPosition(), 1, 1, 0, -1, "fire"))
-                return obj.reward + self.stepCost
+                return obj.reward
         # Done
         return self.stepCost
 
