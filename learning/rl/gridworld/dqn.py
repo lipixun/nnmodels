@@ -92,7 +92,7 @@ class CoreNet(object):
     def conv2d(self, inp, filters, ksize, strides):
         """Conv 2d
         """
-        W = tf.get_variable("W", list(ksize) + [inp.shape[-1], filters], tf.float32, tf.truncated_normal_initializer(stddev=1e-2))
+        W = tf.get_variable("W", list(ksize) + [inp.shape[-1], filters], tf.float32, tf.contrib.layers.xavier_initializer())
         b = tf.get_variable("b", [filters], tf.float32, tf.zeros_initializer())
         return tf.nn.relu(tf.nn.bias_add(tf.nn.conv2d(inp, W, strides, "VALID"), b))
 
@@ -330,7 +330,7 @@ if __name__ == "__main__":
         parser.add_argument("--max-epoch", dest="maxEpoch", type=int, default=1e2, help="The max epoch")
         parser.add_argument("--e-start", dest="eStart", type=float, default=1.0, help="The e start")
         parser.add_argument("--e-end", dest="eEnd", type=float, default=5e-2, help="The e end")
-        parser.add_argument("--e-reduce-steps", dest="eReduceSteps", type=int, default=1e7, help="The e reduce step number")
+        parser.add_argument("--e-reduce-steps", dest="eReduceSteps", type=int, default=1e8, help="The e reduce step number")
         parser.add_argument("-e", "--env-nums", dest="envNums", type=int, default=16, help="The number of grid envs that is observed at the same time")
         parser.add_argument("--grid-size", dest="gridSize", type=int, default=5, help="The grid size")
         parser.add_argument("--outside-reward", dest="outsideReward", type=float, default=0.0, help="The reword when move to outside")
