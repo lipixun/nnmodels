@@ -31,7 +31,7 @@ class GameOb(object):
 class GameEnv(object):
     """The game environment
     """
-    def __init__(self, partial, size, outsideReward=0.0):
+    def __init__(self, partial, size, outsideReward=0.0, stepCost=0.0):
         """Create a new GameEnv
         """
         self.sizeX = size
@@ -40,6 +40,7 @@ class GameEnv(object):
         self.objects = []
         self.partial = partial
         self.outsideReward = outsideReward
+        self.stepCost = stepCost
 
     def reset(self):
         """Reset the environment
@@ -84,7 +85,7 @@ class GameEnv(object):
         # Check if moved or not
         if hero.x == heroX and hero.y == heroY:
             # Not moved
-            return self.outsideReward
+            return self.outsideReward + self.stepCost
         # Get reward
         for obj in self.objects[1:]:
             if hero.x == obj.x and hero.y == obj.y:
@@ -96,7 +97,7 @@ class GameEnv(object):
                     self.objects.append(GameOb(self.newPosition(), 1, 1, 0, -1, "fire"))
                 return obj.reward
         # Done
-        return 0.0
+        return self.stepCost
 
     def randomPositions(self, size):
         """Return a list of random positions
