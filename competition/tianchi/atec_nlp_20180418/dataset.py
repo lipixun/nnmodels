@@ -15,8 +15,8 @@ PaddingSize = 64
 
 Features = {
     "line_no": tf.FixedLenFeature([], dtype=tf.int64),
-    "s1": tf.FixedLenSequenceFeature(shape=[PaddingSize], dtype=tf.int64),
-    "s2": tf.FixedLenSequenceFeature(shape=[PaddingSize], dtype=tf.int64),
+    "s1": tf.FixedLenFeature([PaddingSize], dtype=tf.int64),
+    "s2": tf.FixedLenFeature([PaddingSize], dtype=tf.int64),
     "label": tf.FixedLenFeature([], dtype=tf.float32),
 }
 
@@ -37,8 +37,8 @@ class Dataset(object):
             self._dataset = self._dataset.shuffle(shuffle_size)
         self._dataset = self._dataset.map(parse_example)
         self._dataset = self._dataset.batch(self._batch_size)
-        self._iterator = self._dataset.make_one_shot_iterator()
-        self._iterator_handler = self._iterator_handler.string_handle()
+        self._iterator = self._dataset.make_initializable_iterator()
+        self._iterator_handler = self._iterator.string_handle()
 
     @property
     def output_types(self):
