@@ -131,7 +131,7 @@ class EmbeddedCosineModel(ModelBase):
             )
             score = 1 - tf.reshape(tf.losses.cosine_distance(
                 output_s1 / tf.norm(output_s1, keepdims=True), # unit vector
-                output_s2 / tf.norm(output_s2, keepdims=True), # unit vector
+                tf.stop_gradient(output_s2 / tf.norm(output_s2, keepdims=True)), # unit vector
                 axis=1,
                 reduction=tf.losses.Reduction.NONE), [-1])
             # Score in [-1, 1], scale to [0, 1]
@@ -177,7 +177,7 @@ class BiLSTMModel(ModelBase):
         embedding_size=128,
         lstm_hidden_size=128,
         lstm_layer_num=1,
-        output_method="cosine",
+        output_method="full_connected",
         output_hidden_size=1024,
         ):
         """Create a new BiLSTMModel
@@ -222,7 +222,16 @@ class BiLSTMModel(ModelBase):
         with tf.variable_scope("output"):
             # Output layer
             if output_method == "full_connected":
-                raise NotImplementedError
+                concated_output = tf.reshape(seq_vectors, shape=[-1, seq_vectors.shape[1].value*2])
+                w = tf.get_variable("W",
+                    shape=[concated_output.shape[1].value, 1],
+                    dtype=tf.float32,
+                    initializer=tf.truncated_normal_initializer(stddev=1e-1),
+                    )
+                b = tf.get_variable("b", shape=[1], dtype=tf.float32, initializer=tf.zeros_initializer())
+                logits = tf.nn.xw_plus_b(concated_output, w, b)
+                self._score = tf.reshape(tf.nn.sigmoid(logits), shape=[-1])
+                self._loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.reshape(self._input_label, shape=[-1, 1]), logits=logits))
             elif output_method == "cosine":
                 output_s1, output_s2 = tf.split(
                     value=tf.reshape(seq_vectors, [-1, seq_vectors.shape[1].value*2]),
