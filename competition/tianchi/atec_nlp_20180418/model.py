@@ -9,202 +9,167 @@
 
 """
 
-import sys
 import logging
 
-from os.path import join, dirname, abspath
+from collections import OrderedDict
 
 import tensorflow as tf
 
+from tftrainer import Model, TrainBatchResult, EvaluateBatchResult, PredictBatchResult
+
 from dataset import Dataset
 
-CurrentDir = dirname(abspath(__file__))
-
-class ModelBase(object):
+class ModelBase(Model):
     """The model base
     """
     logger = logging.getLogger("ModelBase")
 
-    def __init__(self, name):
-        """Create a new ModelBase
+    def get_dataset(self):
+        """Get the dataset
         """
-        self._name = name
+        return self._dataset
+
+    def init_train_epoch(self, session, feeder, params):
+        """Initialize training for the epoch
+        Args:
+            session(tf.Session): The tensorflow session
+            feeder(DataFeeder): The data feeder
+            params(Params): The parameters
+        Returns:
+            bool: Succeed or not
+        """
+        if not hasattr(params, "train_files") or not params.train_files:
+            raise ValueError("Require train_files")
+
+        feeder.initialize(session, {self._inputfile: params.train_files})
+
+        return True
+
+    def train_batch(self, session, feeder, params):
+        """Run training for one batch
+        Args:
+            session(tf.Session): The tensorflow session
+            feeder(DataFeeder): The data feeder
+            params(Params): The parameters
+        Returns:
+            TrainBatchResult: The train batch result
+        """
+        raise NotImplementedError
+
+    def init_evaluate_epoch(self, session, feeder, params):
+        """Initialize evaluating
+        Args:
+            session(tf.Session): The tensorflow session
+            feeder(DataFeeder): The data feeder
+            params(Params): The parameters
+        Returns:
+            bool: Succeed or not
+        """
+        if not hasattr(params, "eval_files") or not params.eval_files:
+            return False
+
+        feeder.initialize(session, {self._inputfile: params.eval_files})
+
+        return True
+
+    def evaluate_batch(self, session, feeder, params):
+        """Run evaluating for one batch
+        Args:
+            session(tf.Session): The tensorflow session
+            feeder(DataFeeder): The data feeder
+            params(Params): The parameters
+        Returns:
+            EvaluateBatchResult: The evaluate batch result
+        """
+        raise NotImplementedError
+
+    def init_predict_epoch(self, session, feeder, params):
+        """Initialize predict
+        Args:
+            session(tf.Session): The tensorflow session
+            feeder(DataFeeder): The data feeder
+            params(Params): The parameters
+        Returns:
+            bool: Succeed or not
+        """
+        if not hasattr(params, "predict_files") or not params.predict_files:
+            return False
+
+        feeder.initialize(session, {self._inputfile: params.predict_files})
+
+        return True
+
+    def predict_batch(self, session, feeder, params):
+        """Run predicting for one batch
+        Args:
+            session(tf.Session): The tensorflow session
+            feeder(DataFeeder): The data feeder
+            params(Params): The parameters
+        Returns:
+            PredictBatchResult: The predict batch result
+        """
+        raise NotImplementedError
+
+    def _build_graph(self):
+        """Build the graph
+        """
+        super(ModelBase, self)._build_graph()
+
         # Build dataset & input
         with tf.variable_scope("input"):
-            self._inputfile_placeholder = tf.placeholder(tf.string, shape=[None])
-            self._dataset = Dataset(tf.data.TFRecordDataset(self._inputfile_placeholder))
+            self._inputfile = tf.placeholder(tf.string, shape=[None])
+            self._dataset = Dataset(tf.data.TFRecordDataset(self._inputfile), batch_size=128)
             self._input_line_no, self._input_s1, self._input_s2, self._input_label = \
                 self._dataset.get_next()
-        # Build internal vars
-        with tf.variable_scope("internal"):
-            self._global_step = tf.train.get_or_create_global_step()
-
-    def train(self, train_filenames, validate_filenames, max_epoch_nums=100):
-        """Train the model
-        """
-        with tf.train.MonitoredTrainingSession(
-            checkpoint_dir=join(CurrentDir, "outputs", self._name),
-            config=tf.ConfigProto(allow_soft_placement=True),
-            ) as session:
-            epoch = 0
-            while max_epoch_nums <=0 or epoch < max_epoch_nums:
-                epoch += 1
-                self.logger.info("Epoch: %s", epoch)
-
-                session.run(self._dataset.initializer, feed_dict={self._inputfile_placeholder: train_filenames})
-                try:
-                    while True:
-                        self._run_train(session, feeds={})
-                except tf.errors.OutOfRangeError:
-                    pass
-
-                if validate_filenames:
-                    session.run(self._dataset.initializer, feed_dict={self._inputfile_placeholder: validate_filenames})
-                    try:
-                        while True:
-                            self._run_validate(session, feeds={})
-                    except tf.errors.OutOfRangeError:
-                        pass
-
-    def predict(self, filenames):
-        """Predict by current model
-        Returns:
-            list: A list of tuple(line_no, score)
-        """
-        with tf.train.MonitoredTrainingSession(
-            checkpoint_dir=join(CurrentDir, "outputs", self._name),
-            config=tf.ConfigProto(allow_soft_placement=True),
-            ) as session:
-            session.run(self._dataset.initializer, feed_dict={self._inputfile_placeholder: filenames})
-            try:
-                while True:
-                    for result in self._run_predict(session, feeds={}):
-                        yield result
-            except tf.errors.OutOfRangeError:
-                pass
-
-    def _run_train(self, session, feeds):
-        """Run train
-        """
-        raise NotImplementedError
-
-    def _run_validate(self, session, feeds):
-        """Run validate
-        """
-        raise NotImplementedError
-
-    def _run_predict(self, session, feeds):
-        """Run predict
-        """
-        raise NotImplementedError
-
-class EmbeddedCosineModel(ModelBase):
-    """The cosine with embedding
-    """
-    def __init__(self, name, word_id_size, embedding_size=128):
-        """Create a new EmbeddedCosineModel
-        """
-        super(EmbeddedCosineModel, self).__init__(name)
-        # Build network
-        with tf.variable_scope("input_concat"):
-            # Concat s1 and s2, and reshape
-            inp = tf.concat([self._input_s1, self._input_s2], axis=1)
-            inp = tf.reshape(inp, [-1, inp.shape[1].value/2])
-        with tf.variable_scope("embedding"):
-            # Embedding
-            embedding_w = tf.get_variable(
-                "W",
-                [word_id_size, embedding_size],
-                dtype=tf.float32,
-                initializer=tf.truncated_normal_initializer(stddev=1e-1),
-                )
-            embedded_inp = tf.nn.embedding_lookup(embedding_w, inp) # Shape: [batch size, max length, embedding size]
-        with tf.variable_scope("seq2vec"):
-            # Sequence to vector
-            seq_vectors = tf.reduce_mean(embedded_inp, axis=1) # Shape: [batch size, embedding size]
-        with tf.variable_scope("output"):
-            # Output layer
-            output_s1, output_s2 = tf.split(
-                value=tf.reshape(seq_vectors, [-1, seq_vectors.shape[1].value*2]),
-                axis=1,
-                num_or_size_splits=2
-            )
-            score = 1 - tf.reshape(tf.losses.cosine_distance(
-                output_s1 / tf.norm(output_s1, keepdims=True), # unit vector
-                tf.stop_gradient(output_s2 / tf.norm(output_s2, keepdims=True)), # unit vector
-                axis=1,
-                reduction=tf.losses.Reduction.NONE), [-1])
-            # Score in [-1, 1], scale to [0, 1]
-            self._score = score / 2.0 + 0.5
-            self._loss = tf.reduce_mean(tf.square(score - self._input_label))
-        with tf.variable_scope("optimize"):
-            # Optimize
-            self._optimizer = tf.train.AdamOptimizer(1e-3)
-            trainable_vars = tf.trainable_variables()
-            gradient_and_variables = self._optimizer.compute_gradients(self._loss, trainable_vars)
-            clipped_gradients, _ = tf.clip_by_global_norm([grad for grad, _ in gradient_and_variables], 5.0)
-            self._optimize_op = self._optimizer.apply_gradients(zip(clipped_gradients, trainable_vars), self._global_step)
-
-    def _run_train(self, session, feeds):
-        """Run train
-        """
-        loss, _ = session.run([self._loss, self._optimize_op], feeds)
-        print >>sys.stderr, "Loss:", loss
-
-    def _run_validate(self, session, feeds):
-        """Run validate
-        """
-        raise NotImplementedError
-
-    def _run_predict(self, session, feeds):
-        """Run predict
-        """
-        line_nos, scores = session.run([self._input_line_no, self._score], feeds)
-        return zip(line_nos, scores)
-
-#
-#
-# Bi-LSTM with cosine distance & full connected output layer
-#
-#
 
 class BiLSTMModel(ModelBase):
     """The bidirectional lstm model
     """
     def __init__(self,
-        name,
         word_id_size,
         embedding_size=128,
         lstm_hidden_size=128,
         lstm_layer_num=1,
-        output_method="full_connected",
         output_hidden_size=1024,
         ):
         """Create a new BiLSTMModel
         """
-        super(BiLSTMModel, self).__init__(name)
-        # Build network
+        self._word_id_size = word_id_size
+        self._embedding_size = embedding_size
+        self._lstm_hidden_size = lstm_hidden_size
+        self._lstm_layer_num = lstm_layer_num
+        self._output_hidden_size = output_hidden_size
+
+        super(BiLSTMModel, self).__init__()
+
+    def _build_graph(self):
+        """Build the graph
+        """
+        super(BiLSTMModel, self)._build_graph()
+
         with tf.variable_scope("input_concat"):
             # Concat s1 and s2, and reshape
             inp = tf.concat([self._input_s1, self._input_s2], axis=1)
             inp = tf.reshape(inp, [-1, inp.shape[1].value/2])
+
         with tf.variable_scope("embedding"):
             # Embedding
             embedding_w = tf.get_variable(
                 "W",
-                [word_id_size, embedding_size],
+                [self._word_id_size, self._embedding_size],
                 dtype=tf.float32,
                 initializer=tf.truncated_normal_initializer(stddev=1e-1),
                 )
             embedded_inp = tf.nn.embedding_lookup(embedding_w, inp) # Shape: [batch size, max length, embedding size]
+
         with tf.variable_scope("lstm"):
             # Bi-LSTM
-            lstm_forward_cell = tf.nn.rnn_cell.BasicLSTMCell(lstm_hidden_size)
-            if lstm_layer_num > 1:
-                lstm_forward_cell = tf.nn.rnn_cell.MultiRNNCell([lstm_forward_cell]*lstm_layer_num)
-            lstm_backward_cell = tf.nn.rnn_cell.BasicLSTMCell(lstm_hidden_size)
-            if lstm_layer_num > 1:
-                lstm_backward_cell = tf.nn.rnn_cell.MultiRNNCell([lstm_backward_cell]*lstm_layer_num)
+            lstm_forward_cell = tf.nn.rnn_cell.BasicLSTMCell(self._lstm_hidden_size)
+            if self._lstm_layer_num > 1:
+                lstm_forward_cell = tf.nn.rnn_cell.MultiRNNCell([lstm_forward_cell] * self._lstm_layer_num)
+            lstm_backward_cell = tf.nn.rnn_cell.BasicLSTMCell(self._lstm_hidden_size)
+            if self._lstm_layer_num > 1:
+                lstm_backward_cell = tf.nn.rnn_cell.MultiRNNCell([lstm_backward_cell] * self._lstm_layer_num)
 
             (lstm_output_forward, lstm_output_backward), _ = tf.nn.bidirectional_dynamic_rnn(
                 lstm_forward_cell,
@@ -216,57 +181,142 @@ class BiLSTMModel(ModelBase):
 
             # LSTM output, shape: [batch size, max length, lstm_hidden_size*2]
             lstm_output = tf.concat([lstm_output_forward, tf.reverse(lstm_output_backward, axis=[1])], axis=2)
+
         with tf.variable_scope("seq2vec"):
             # Sequence to vector
             seq_vectors = tf.reduce_mean(lstm_output, axis=1) # Shape: [batch size, lstm_hidden_size*2]
+
         with tf.variable_scope("output"):
             # Output layer
-            if output_method == "full_connected":
-                concated_output = tf.reshape(seq_vectors, shape=[-1, seq_vectors.shape[1].value*2])
+            concated_output = tf.reshape(seq_vectors, shape=[-1, seq_vectors.shape[1].value*2])
+            with tf.variable_scope("middle"):
                 w = tf.get_variable("W",
-                    shape=[concated_output.shape[1].value, 1],
+                    shape=[concated_output.shape[1].value, self._output_hidden_size],
+                    dtype=tf.float32,
+                    initializer=tf.truncated_normal_initializer(stddev=1e-1),
+                    )
+                b = tf.get_variable("b", shape=[self._output_hidden_size], dtype=tf.float32, initializer=tf.zeros_initializer())
+                output = tf.nn.relu(tf.nn.xw_plus_b(concated_output, w , b))
+            with tf.variable_scope("output"):
+                w = tf.get_variable("W",
+                    shape=[self._output_hidden_size, 1],
                     dtype=tf.float32,
                     initializer=tf.truncated_normal_initializer(stddev=1e-1),
                     )
                 b = tf.get_variable("b", shape=[1], dtype=tf.float32, initializer=tf.zeros_initializer())
-                logits = tf.nn.xw_plus_b(concated_output, w, b)
-                self._score = tf.reshape(tf.nn.sigmoid(logits), shape=[-1])
-                self._loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.reshape(self._input_label, shape=[-1, 1]), logits=logits))
-            elif output_method == "cosine":
-                output_s1, output_s2 = tf.split(
-                    value=tf.reshape(seq_vectors, [-1, seq_vectors.shape[1].value*2]),
-                    axis=1,
-                    num_or_size_splits=2
-                )
-                score = 1 - tf.reshape(tf.losses.cosine_distance(
-                    output_s1 / tf.norm(output_s1, keepdims=True), # unit vector
-                    output_s2 / tf.norm(output_s2, keepdims=True), # unit vector
-                    axis=1,
-                    reduction=tf.losses.Reduction.NONE), [-1])
-                # Score in [-1, 1], scale to [0, 1]
-                self._score = score / 2.0 + 0.5
-                self._loss = tf.reduce_mean(tf.square(score - self._input_label))
+                logits = tf.nn.xw_plus_b(output, w, b)
+
+            self._score = tf.reshape(tf.nn.sigmoid(logits), shape=[-1])
+            self._loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.reshape(self._input_label, shape=[-1, 1]), logits=logits))
+
+        with tf.variable_scope("metric"):
+            # Metric
+            self._precision_at_thresholds, self._precision_at_thresholds_update_op = tf.metrics.precision_at_thresholds(
+                tf.equal(self._input_label, 1),
+                self._score,
+                [0.9, 0.7, 0.5],
+            )
+            self._recall_at_thresholds, self._recall_at_thresholds_update_op = tf.metrics.recall_at_thresholds(
+                tf.equal(self._input_label, 1),
+                self._score,
+                [0.9, 0.7, 0.5],
+            )
+
         with tf.variable_scope("optimize"):
             # Optimize
             self._optimizer = tf.train.AdamOptimizer(1e-3)
             trainable_vars = tf.trainable_variables()
             gradient_and_variables = self._optimizer.compute_gradients(self._loss, trainable_vars)
             clipped_gradients, _ = tf.clip_by_global_norm([grad for grad, _ in gradient_and_variables], 5.0)
-            self._optimize_op = self._optimizer.apply_gradients(zip(clipped_gradients, trainable_vars), self._global_step)
+            self._optimize_op = self._optimizer.apply_gradients(zip(clipped_gradients, trainable_vars), self.global_step)
 
-    def _run_train(self, session, feeds):
-        """Run train
+    def train_batch(self, session, feeder, params):
+        """Run training for one batch
+        Args:
+            session(tf.Session): The tensorflow session
+            feeder(DataFeeder): The data feeder
+            params(Params): The parameters
+        Returns:
+            TrainBatchResult: The train batch result
         """
-        loss, _ = session.run([self._loss, self._optimize_op], feeds)
-        print >>sys.stderr, "Loss:", loss
+        feed_dict = feeder.feed_dict() or {}
 
-    def _run_validate(self, session, feeds):
-        """Run validate
-        """
-        raise NotImplementedError
+        if params.should_log:
+            _, _, _, loss, precision_at_thresholds, recall_at_thresholds = \
+                session.run([
+                    self._optimize_op,
+                    self._precision_at_thresholds_update_op,
+                    self._recall_at_thresholds_update_op,
+                    self._loss,
+                    self._precision_at_thresholds,
+                    self._recall_at_thresholds,
+                    ], feed_dict)
 
-    def _run_predict(self, session, feeds):
-        """Run predict
+            return TrainBatchResult(
+                {"_": loss},
+                OrderedDict([
+                    ("p@0.9", precision_at_thresholds[0]),
+                    ("p@0.7", precision_at_thresholds[1]),
+                    ("p@0.5", precision_at_thresholds[2]),
+                    ("r@0.9", recall_at_thresholds[0]),
+                    ("r@0.7", recall_at_thresholds[1]),
+                    ("r@0.5", recall_at_thresholds[2]),
+                ]),
+            )
+        else:
+            _, _, _, loss = session.run([
+                self._optimize_op,
+                self._precision_at_thresholds_update_op,
+                self._recall_at_thresholds_update_op,
+                self._loss,
+                ], feed_dict)
+
+            return TrainBatchResult({"_": loss})
+
+    def evaluate_batch(self, session, feeder, params):
+        """Run evaluating for one batch
+        Args:
+            session(tf.Session): The tensorflow session
+            feeder(DataFeeder): The data feeder
+            params(Params): The parameters
+        Returns:
+            EvaluateBatchResult: The evaluate batch result
         """
-        line_nos, scores = session.run([self._input_line_no, self._score], feeds)
-        return zip(line_nos, scores)
+        feed_dict = feeder.feed_dict() or {}
+
+        _, _, _, loss, precision_at_thresholds, recall_at_thresholds = \
+            session.run([
+                self._optimize_op,
+                self._precision_at_thresholds_update_op,
+                self._recall_at_thresholds_update_op,
+                self._loss,
+                self._precision_at_thresholds,
+                self._recall_at_thresholds,
+                ], feed_dict)
+
+        return EvaluateBatchResult(
+            {"_": loss},
+            OrderedDict([
+                ("p@0.9", precision_at_thresholds[0]),
+                ("p@0.7", precision_at_thresholds[1]),
+                ("p@0.5", precision_at_thresholds[2]),
+                ("r@0.9", recall_at_thresholds[0]),
+                ("r@0.7", recall_at_thresholds[1]),
+                ("r@0.5", recall_at_thresholds[2]),
+            ]),
+        )
+
+    def predict_batch(self, session, feeder, params):
+        """Run predicting for one batch
+        Args:
+            session(tf.Session): The tensorflow session
+            feeder(DataFeeder): The data feeder
+            params(Params): The parameters
+        Returns:
+            PredictBatchResult: The predict batch result
+        """
+        feed_dict = feeder.feed_dict() or {}
+
+        line_nos, scores = session.run([self._input_line_no, self._score], feed_dict)
+
+        return PredictBatchResult({"line_no": line_nos, "score": scores})
