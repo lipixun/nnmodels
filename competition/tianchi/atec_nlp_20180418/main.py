@@ -41,7 +41,13 @@ def train(name, workpath, dict_file, train_files, eval_files, epoch):
 
     model = BiLSTMModel(text_dict.id_size)
     trainer = tftrainer.Trainer(model)
-    trainer.train(name, workpath, epoch, train_files=train_files, eval_files=eval_files)
+    trainer.train(
+        name,
+        workpath,
+        epoch,
+        train_params_func=lambda p: {"input_files": train_files},
+        eval_params_func=lambda p: {"input_files": eval_files},
+        )
 
 def predict(name, workpath, dict_file, predict_files, with_score):
     """Predict by the model
@@ -56,7 +62,7 @@ def predict(name, workpath, dict_file, predict_files, with_score):
 
     model = BiLSTMModel(text_dict.id_size)
     trainer = tftrainer.Trainer(model)
-    for result in trainer.predict(name, workpath, predict_files=predict_files):
+    for result in trainer.predict(name, workpath, params_func=lambda p: {"input_files": predict_files}):
         line_nos, scores = result.outputs["line_no"], result.outputs["score"]
         for line_no, score in zip(line_nos, scores):
             if with_score:

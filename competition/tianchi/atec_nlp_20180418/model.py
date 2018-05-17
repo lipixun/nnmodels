@@ -38,10 +38,10 @@ class ModelBase(Model):
         Returns:
             bool: Succeed or not
         """
-        if not hasattr(params, "train_files") or not params.train_files:
-            raise ValueError("Require train_files")
+        if not hasattr(params, "input_files") or not params.input_files:
+            raise ValueError("Require input_files")
 
-        feeder.initialize(session, {self._inputfile: params.train_files})
+        feeder.initialize(session, {self._inputfile: params.input_files})
 
         return True
 
@@ -65,10 +65,10 @@ class ModelBase(Model):
         Returns:
             bool: Succeed or not
         """
-        if not hasattr(params, "eval_files") or not params.eval_files:
+        if not hasattr(params, "input_files") or not params.input_files:
             return False
 
-        feeder.initialize(session, {self._inputfile: params.eval_files})
+        feeder.initialize(session, {self._inputfile: params.input_files})
 
         return True
 
@@ -92,10 +92,10 @@ class ModelBase(Model):
         Returns:
             bool: Succeed or not
         """
-        if not hasattr(params, "predict_files") or not params.predict_files:
+        if not hasattr(params, "input_files") or not params.input_files:
             return False
 
-        feeder.initialize(session, {self._inputfile: params.predict_files})
+        feeder.initialize(session, {self._inputfile: params.input_files})
 
         return True
 
@@ -131,6 +131,7 @@ class BiLSTMModel(ModelBase):
         lstm_hidden_size=128,
         lstm_layer_num=1,
         output_hidden_size=1024,
+        regularizer_gamma=0.0,
         ):
         """Create a new BiLSTMModel
         """
@@ -139,13 +140,48 @@ class BiLSTMModel(ModelBase):
         self._lstm_hidden_size = lstm_hidden_size
         self._lstm_layer_num = lstm_layer_num
         self._output_hidden_size = output_hidden_size
+        self._regularizer_gamma = regularizer_gamma
 
         super(BiLSTMModel, self).__init__()
+
+    def init_train_epoch(self, session, feeder, params):
+        """Initialize training for the epoch
+        Args:
+            session(tf.Session): The tensorflow session
+            feeder(DataFeeder): The data feeder
+            params(Params): The parameters
+        Returns:
+            bool: Succeed or not
+        """
+        if not super(BiLSTMModel, self).init_train_epoch(session, feeder, params):
+            return False
+
+        session.run([self._reset_metric_op])
+
+        return True
+
+    def init_evaluate_epoch(self, session, feeder, params):
+        """Initialize evaluating
+        Args:
+            session(tf.Session): The tensorflow session
+            feeder(DataFeeder): The data feeder
+            params(Params): The parameters
+        Returns:
+            bool: Succeed or not
+        """
+        if not super(BiLSTMModel, self).init_evaluate_epoch(session, feeder, params):
+            return False
+
+        session.run([self._reset_metric_op])
+
+        return True
 
     def _build_graph(self):
         """Build the graph
         """
         super(BiLSTMModel, self)._build_graph()
+
+        regularizer = tf.contrib.layers.l2_regularizer(scale=self._regularizer_gamma) # pylint: disable=no-member
 
         with tf.variable_scope("input_concat"):
             # Concat s1 and s2, and reshape
@@ -159,6 +195,7 @@ class BiLSTMModel(ModelBase):
                 [self._word_id_size, self._embedding_size],
                 dtype=tf.float32,
                 initializer=tf.truncated_normal_initializer(stddev=1e-1),
+                regularizer=regularizer,
                 )
             embedded_inp = tf.nn.embedding_lookup(embedding_w, inp) # Shape: [batch size, max length, embedding size]
 
@@ -185,31 +222,28 @@ class BiLSTMModel(ModelBase):
         with tf.variable_scope("seq2vec"):
             # Sequence to vector
             seq_vectors = tf.reduce_mean(lstm_output, axis=1) # Shape: [batch size, lstm_hidden_size*2]
+            seq_vectors = tf.cond(self.is_training, lambda: tf.nn.dropout(seq_vectors, 0.8), lambda: seq_vectors)
 
-        with tf.variable_scope("output"):
+        with tf.variable_scope("output", initializer=tf.truncated_normal_initializer(stddev=1e-1), regularizer=regularizer):
             # Output layer
-            concated_output = tf.reshape(seq_vectors, shape=[-1, seq_vectors.shape[1].value*2])
+            output = tf.reshape(seq_vectors, shape=[-1, seq_vectors.shape[1].value*2])
             with tf.variable_scope("middle"):
-                w = tf.get_variable("W",
-                    shape=[concated_output.shape[1].value, self._output_hidden_size],
-                    dtype=tf.float32,
-                    initializer=tf.truncated_normal_initializer(stddev=1e-1),
-                    )
+                w = tf.get_variable("W", shape=[output.shape[1].value, self._output_hidden_size], dtype=tf.float32)
                 b = tf.get_variable("b", shape=[self._output_hidden_size], dtype=tf.float32, initializer=tf.zeros_initializer())
-                output = tf.nn.relu(tf.nn.xw_plus_b(concated_output, w , b))
+                output = tf.nn.relu(tf.nn.xw_plus_b(output, w , b))
+                output = tf.cond(self.is_training, lambda: tf.nn.dropout(output, 0.8), lambda: output)
             with tf.variable_scope("output"):
-                w = tf.get_variable("W",
-                    shape=[self._output_hidden_size, 1],
-                    dtype=tf.float32,
-                    initializer=tf.truncated_normal_initializer(stddev=1e-1),
-                    )
+                w = tf.get_variable("W", shape=[self._output_hidden_size, 1], dtype=tf.float32)
                 b = tf.get_variable("b", shape=[1], dtype=tf.float32, initializer=tf.zeros_initializer())
                 logits = tf.nn.xw_plus_b(output, w, b)
-
+            # Output & loss
             self._score = tf.reshape(tf.nn.sigmoid(logits), shape=[-1])
             self._loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.reshape(self._input_label, shape=[-1, 1]), logits=logits))
+            l2_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
+            if l2_losses:
+                self._loss += tf.add_n(l2_losses)
 
-        with tf.variable_scope("metric"):
+        with tf.variable_scope("metric") as scope:
             # Metric
             self._precision_at_thresholds, self._precision_at_thresholds_update_op = tf.metrics.precision_at_thresholds(
                 tf.equal(self._input_label, 1),
@@ -221,6 +255,7 @@ class BiLSTMModel(ModelBase):
                 self._score,
                 [0.9, 0.7, 0.5],
             )
+            self._reset_metric_op = tf.variables_initializer(tf.contrib.framework.get_variables(scope, collection=tf.GraphKeys.LOCAL_VARIABLES)) # pylint: disable=no-member
 
         with tf.variable_scope("optimize"):
             # Optimize
@@ -303,8 +338,7 @@ class BiLSTMModel(ModelBase):
                 ("r@0.9", recall_at_thresholds[0]),
                 ("r@0.7", recall_at_thresholds[1]),
                 ("r@0.5", recall_at_thresholds[2]),
-            ]),
-        )
+            ]))
 
     def predict_batch(self, session, feeder, params):
         """Run predicting for one batch

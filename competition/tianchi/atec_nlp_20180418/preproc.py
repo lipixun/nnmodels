@@ -9,14 +9,12 @@
 
 """
 
-from os import makedirs
-from os.path import isdir, abspath, dirname
+import tftrainer
 
-from util import get_input_output_pair
 from text import TextDictionary, parse_text_line
 from example import ExampleBuilder
 
-def preprocess(input_filename, output_filename, dictionary_filename, no_fit):
+def preprocess(input_path, output_path, dictionary_filename, no_fit):
     """Preprocess
     """
     if no_fit:
@@ -26,8 +24,8 @@ def preprocess(input_filename, output_filename, dictionary_filename, no_fit):
 
     if not no_fit:
         # Build the dictionary
-        for inpfile, _ in get_input_output_pair(input_filename, output_filename):
-            with open(inpfile, "rb") as fd:
+        for input_file in tftrainer.path.findfiles(input_path):
+            with open(input_file, "rb") as fd:
                 for line in fd:
                     line = line.strip()
                     if line:
@@ -40,19 +38,15 @@ def preprocess(input_filename, output_filename, dictionary_filename, no_fit):
     # Build the tensorflow example file
     example_builder = ExampleBuilder(text_dict)
 
-    for inpfile, outfile in get_input_output_pair(input_filename, output_filename):
-        outfile = abspath(outfile)
-        out_dirname = dirname(outfile)
-        if not isdir(out_dirname):
-            makedirs(out_dirname)
+    for input_file, output_file in tftrainer.path.get_input_output_pair(input_path, output_path):
 
-        def read_inpfile():
-            """Read inpfile
+        def read_input_file():
+            """Read input file
             """
-            with open(inpfile, "rb") as fd:
+            with open(input_file, "rb") as fd:
                 for line in fd:
                     line = line.strip()
                     if line:
                         yield line
 
-        example_builder.build_and_write_tf_record_file(read_inpfile(), outfile + ".tfrecord")
+        example_builder.build_and_write_tf_record_file(read_input_file(), output_file + ".tfrecord")
