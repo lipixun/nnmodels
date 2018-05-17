@@ -9,9 +9,14 @@
 
 """
 
+from __future__ import print_function
+
+import six
 import sys
-reload(sys)
-sys.setdefaultencoding("utf8")
+
+if six.PY2:
+    reload(sys)
+    sys.setdefaultencoding("utf8")
 
 import logging
 
@@ -29,13 +34,13 @@ def train(name, workpath, dict_file, train_files, eval_files, epoch):
     train_files = tftrainer.path.findfiles(train_files)
     eval_files = tftrainer.path.findfiles(eval_files)
 
-    print >>sys.stderr, "Train files:"
+    print("Train files:", file=sys.stderr)
     for filename in train_files:
-        print >>sys.stderr, "\t%s" % filename
+        print("\t%s" % filename, file=sys.stderr)
 
-    print >>sys.stderr, "Evaluate files:"
+    print("Evaluate files:", file=sys.stderr)
     for filename in eval_files:
-        print >>sys.stderr, "\t%s" % filename
+        print("\t%s" % filename, file=sys.stderr)
 
     text_dict = TextDictionary.load(dict_file)
 
@@ -54,9 +59,9 @@ def predict(name, workpath, dict_file, predict_files, with_score):
     """
     predict_files = tftrainer.path.findfiles(predict_files)
 
-    print >>sys.stderr, "Predict files:"
+    print("Predict files:", file=sys.stderr)
     for filename in predict_files:
-        print >>sys.stderr, "\t%s" % filename
+        print("\t%s" % filename, file=sys.stderr)
 
     text_dict = TextDictionary.load(dict_file)
 
@@ -66,9 +71,9 @@ def predict(name, workpath, dict_file, predict_files, with_score):
         line_nos, scores = result.outputs["line_no"], result.outputs["score"]
         for line_no, score in zip(line_nos, scores):
             if with_score:
-                print "%s\t%d\t%.4f" % (line_no, 1 if score >= 0.5 else 0, score)
+                print("%s\t%d\t%.4f" % (line_no, 1 if score >= 0.5 else 0, score))
             else:
-                print "%s\t%d" % (line_no, 1 if score >= 0.5 else 0)
+                print("%s\t%d" % (line_no, 1 if score >= 0.5 else 0))
 
 if __name__ == "__main__":
 

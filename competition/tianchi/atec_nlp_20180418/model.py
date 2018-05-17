@@ -186,7 +186,7 @@ class BiLSTMModel(ModelBase):
         with tf.variable_scope("input_concat"):
             # Concat s1 and s2, and reshape
             inp = tf.concat([self._input_s1, self._input_s2], axis=1)
-            inp = tf.reshape(inp, [-1, inp.shape[1].value/2])
+            inp = tf.reshape(inp, [-1, int(inp.shape[1].value/2)])
 
         with tf.variable_scope("embedding"):
             # Embedding
@@ -226,7 +226,7 @@ class BiLSTMModel(ModelBase):
 
         with tf.variable_scope("output", initializer=tf.truncated_normal_initializer(stddev=1e-1), regularizer=regularizer):
             # Output layer
-            output = tf.reshape(seq_vectors, shape=[-1, seq_vectors.shape[1].value*2])
+            output = tf.reshape(seq_vectors, shape=[-1, int(seq_vectors.shape[1].value*2)])
             with tf.variable_scope("middle"):
                 w = tf.get_variable("W", shape=[output.shape[1].value, self._output_hidden_size], dtype=tf.float32)
                 b = tf.get_variable("b", shape=[self._output_hidden_size], dtype=tf.float32, initializer=tf.zeros_initializer())

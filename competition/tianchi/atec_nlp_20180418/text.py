@@ -9,6 +9,8 @@
 
 """
 
+import six
+
 from collections import Counter
 
 from util import json
@@ -91,8 +93,8 @@ class TextDictionary(object):
         """Save this dictionary to the file
         """
         d = { "word_mapping": self._word_mapping, "id_counter": self._id_counter.most_common() }
-        with open(filename, "wb") as fd:
-            json.dump(d, fd, ensure_ascii=False)
+        with open(filename, "w") as fd:
+            json.dump(d, fd)
 
     @classmethod
     def load(cls, filename, normalize_nums=True, use_jieba=False):
@@ -113,7 +115,7 @@ class TextDictionary(object):
 def parse_text_line(line):
     """Parse a text line
     """
-    line = unicode(line.replace("\xef\xbb\xbf", ""))
+    line = line.replace(b"\xef\xbb\xbf", b"").decode("utf8")
 
     parts = []
     for part in line.split("\t"):
@@ -122,7 +124,7 @@ def parse_text_line(line):
             parts.append(part)
     line_no, s1, s2, label = None, None, None, None
     if len(parts) < 3 or len(parts) > 4:
-        raise ValueError("Malformed line")
+        raise ValueError("Malformed line [%s]" % line)
     elif len(parts) == 3:
         line_no, s1, s2 = parts # pylint: disable=unbalanced-tuple-unpacking
         line_no = int(line_no)
