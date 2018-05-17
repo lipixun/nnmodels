@@ -33,6 +33,8 @@ def train(name, workpath, dict_file, train_files, eval_files, epoch):
     """
     train_files = tftrainer.path.findfiles(train_files)
     eval_files = tftrainer.path.findfiles(eval_files)
+    if not train_files:
+        raise ValueError("Require train files")
 
     print("Train files:", file=sys.stderr)
     for filename in train_files:
@@ -54,20 +56,22 @@ def train(name, workpath, dict_file, train_files, eval_files, epoch):
         eval_params_func=lambda p: {"input_files": eval_files},
         )
 
-def predict(name, workpath, dict_file, predict_files, with_score):
+def predict(name, workpath, dict_file, input_files, with_score):
     """Predict by the model
     """
-    predict_files = tftrainer.path.findfiles(predict_files)
+    input_files = tftrainer.path.findfiles(input_files)
+    if not input_files:
+        raise ValueError("Require input files")
 
-    print("Predict files:", file=sys.stderr)
-    for filename in predict_files:
+    print("Input files:", file=sys.stderr)
+    for filename in input_files:
         print("\t%s" % filename, file=sys.stderr)
 
     text_dict = TextDictionary.load(dict_file)
 
     model = BiLSTMModel(text_dict.id_size)
     trainer = tftrainer.Trainer(model)
-    for result in trainer.predict(name, workpath, params_func=lambda p: {"input_files": predict_files}):
+    for result in trainer.predict(name, workpath, params_func=lambda p: {"input_files": input_files}):
         line_nos, scores = result.outputs["line_no"], result.outputs["score"]
         for line_no, score in zip(line_nos, scores):
             if with_score:
@@ -103,6 +107,7 @@ if __name__ == "__main__":
         predict_parser.add_argument("-n", "--name", dest="name", required=True, help="Model name")
         predict_parser.add_argument("-d", "--dict-file", dest="dict_file", required=True, help="The dictionary filename")
         predict_parser.add_argument("-f", "--file", dest="files", required=True, help="The input file(s)")
+        predict_parser.add_argument("-p", "--workpath", dest="workpath", default="outputs", help="The workpath")
         predict_parser.add_argument("--with-score", dest="with_score", action="store_true", help="Print result with score")
 
         return parser.parse_args()

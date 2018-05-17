@@ -113,5 +113,9 @@ ENV/
 
 # data files
 *.data
+*.tfrecord
+*.tgz
+*.tar.gz
+*.zip
 outputs/
 scores
