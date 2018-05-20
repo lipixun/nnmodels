@@ -8,7 +8,9 @@
     Description:
 
 """
+from __future__ import print_function
 
+import math
 import logging
 
 from collections import OrderedDict
@@ -132,6 +134,8 @@ class BiLSTMModel(ModelBase):
         lstm_layer_num=1,
         output_hidden_size=1024,
         regularizer_gamma=0.0,
+        attention=False,
+        attention_size=256,
         ):
         """Create a new BiLSTMModel
         """
@@ -141,6 +145,8 @@ class BiLSTMModel(ModelBase):
         self._lstm_layer_num = lstm_layer_num
         self._output_hidden_size = output_hidden_size
         self._regularizer_gamma = regularizer_gamma
+        self._attention = attention
+        self._attention_size = attention_size
 
         super(BiLSTMModel, self).__init__()
 
@@ -218,11 +224,24 @@ class BiLSTMModel(ModelBase):
 
             # LSTM output, shape: [batch size, max length, lstm_hidden_size*2]
             lstm_output = tf.concat([lstm_output_forward, tf.reverse(lstm_output_backward, axis=[1])], axis=2)
+            lstm_output = tf.cond(self.is_training, lambda: tf.nn.dropout(lstm_output, 0.8), lambda: lstm_output)
 
-        with tf.variable_scope("seq2vec"):
-            # Sequence to vector
-            seq_vectors = tf.reduce_mean(lstm_output, axis=1) # Shape: [batch size, lstm_hidden_size*2]
-            seq_vectors = tf.cond(self.is_training, lambda: tf.nn.dropout(seq_vectors, 0.8), lambda: seq_vectors)
+        if self._attention:
+            with tf.variable_scope("attention"):
+                # Sequence to vector by self attention
+                w = tf.get_variable("W", shape=[1, self._lstm_hidden_size*2, self._attention_size*3], dtype=tf.float32)
+                conv_out = tf.nn.conv1d(lstm_output, w, stride=1, padding="VALID") # Shape = [batch size, max_length, attention_size * 3]
+                # Split into q k v
+                q, k, v = tf.split(conv_out, 3, axis=2) # Shape = [batch size, max_length, attention_size] for each tensor
+                # Dot product attention
+                attention = tf.nn.softmax(tf.matmul(q, k, transpose_b=True) / math.sqrt(self._attention_size)) # Shape = [batch size, max_length, max_length]
+                seq_vectors = tf.reduce_sum(tf.matmul(attention, v), axis=1)  # Shape = [batch size, attention_size]
+        else:
+            with tf.variable_scope("seq2vec"):
+                # Sequence to vector by sum pooling
+                seq_vectors = tf.reduce_mean(lstm_output, axis=1) # Shape: [batch size, lstm_hidden_size*2]
+
+        seq_vectors = tf.cond(self.is_training, lambda: tf.nn.dropout(seq_vectors, 0.8), lambda: seq_vectors)
 
         with tf.variable_scope("output", initializer=tf.truncated_normal_initializer(stddev=1e-1), regularizer=regularizer):
             # Output layer
