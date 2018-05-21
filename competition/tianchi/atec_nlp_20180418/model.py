@@ -17,6 +17,7 @@ from collections import OrderedDict
 
 import tensorflow as tf
 
+import tftrainer
 from tftrainer import Model, TrainBatchResult, EvaluateBatchResult, PredictBatchResult
 
 from dataset import Dataset
@@ -264,17 +265,12 @@ class BiLSTMModel(ModelBase):
 
         with tf.variable_scope("metric") as scope:
             # Metric
-            self._precision_at_thresholds, self._precision_at_thresholds_update_op = tf.metrics.precision_at_thresholds(
+            self._f1_score, self._recall, self._precision, self._update_metric_op = tftrainer.metrics.f1_at_thresholds(
                 tf.equal(self._input_label, 1),
                 self._score,
                 [0.9, 0.7, 0.5],
             )
-            self._recall_at_thresholds, self._recall_at_thresholds_update_op = tf.metrics.recall_at_thresholds(
-                tf.equal(self._input_label, 1),
-                self._score,
-                [0.9, 0.7, 0.5],
-            )
-            self._reset_metric_op = tf.variables_initializer(tf.contrib.framework.get_variables(scope, collection=tf.GraphKeys.LOCAL_VARIABLES)) # pylint: disable=no-member
+            self._reset_metric_op = tftrainer.reset_local_variables(scope)
 
         with tf.variable_scope("optimize"):
             # Optimize
@@ -296,32 +292,34 @@ class BiLSTMModel(ModelBase):
         feed_dict = feeder.feed_dict() or {}
 
         if params.should_log:
-            _, _, _, loss, precision_at_thresholds, recall_at_thresholds = \
+            _, _, loss, f1, recall, precision = \
                 session.run([
                     self._optimize_op,
-                    self._precision_at_thresholds_update_op,
-                    self._recall_at_thresholds_update_op,
+                    self._update_metric_op,
                     self._loss,
-                    self._precision_at_thresholds,
-                    self._recall_at_thresholds,
+                    self._f1_score,
+                    self._recall,
+                    self._precision,
                     ], feed_dict)
 
             return TrainBatchResult(
                 {"_": loss},
                 OrderedDict([
-                    ("p@0.9", precision_at_thresholds[0]),
-                    ("p@0.7", precision_at_thresholds[1]),
-                    ("p@0.5", precision_at_thresholds[2]),
-                    ("r@0.9", recall_at_thresholds[0]),
-                    ("r@0.7", recall_at_thresholds[1]),
-                    ("r@0.5", recall_at_thresholds[2]),
+                    ("f1@0.9", f1[0]),
+                    ("f1@0.7", f1[1]),
+                    ("f1@0.5", f1[2]),
+                    ("p@0.9", precision[0]),
+                    ("p@0.7", precision[1]),
+                    ("p@0.5", precision[2]),
+                    ("r@0.9", recall[0]),
+                    ("r@0.7", recall[1]),
+                    ("r@0.5", recall[2]),
                 ]),
             )
         else:
-            _, _, _, loss = session.run([
+            _, _, loss = session.run([
                 self._optimize_op,
-                self._precision_at_thresholds_update_op,
-                self._recall_at_thresholds_update_op,
+                self._update_metric_op,
                 self._loss,
                 ], feed_dict)
 
@@ -338,25 +336,28 @@ class BiLSTMModel(ModelBase):
         """
         feed_dict = feeder.feed_dict() or {}
 
-        _, _, _, loss, precision_at_thresholds, recall_at_thresholds = \
+        _, _, loss, f1, recall, precision = \
             session.run([
                 self._optimize_op,
-                self._precision_at_thresholds_update_op,
-                self._recall_at_thresholds_update_op,
+                self._update_metric_op,
                 self._loss,
-                self._precision_at_thresholds,
-                self._recall_at_thresholds,
+                self._f1_score,
+                self._recall,
+                self._precision,
                 ], feed_dict)
 
         return EvaluateBatchResult(
             {"_": loss},
             OrderedDict([
-                ("p@0.9", precision_at_thresholds[0]),
-                ("p@0.7", precision_at_thresholds[1]),
-                ("p@0.5", precision_at_thresholds[2]),
-                ("r@0.9", recall_at_thresholds[0]),
-                ("r@0.7", recall_at_thresholds[1]),
-                ("r@0.5", recall_at_thresholds[2]),
+                ("f1@0.9", f1[0]),
+                ("f1@0.7", f1[1]),
+                ("f1@0.5", f1[2]),
+                ("p@0.9", precision[0]),
+                ("p@0.7", precision[1]),
+                ("p@0.5", precision[2]),
+                ("r@0.9", recall[0]),
+                ("r@0.7", recall[1]),
+                ("r@0.5", recall[2]),
             ]))
 
     def predict_batch(self, session, feeder, params):
