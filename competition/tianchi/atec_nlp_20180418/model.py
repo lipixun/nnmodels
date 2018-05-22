@@ -131,10 +131,11 @@ class BiLSTMModel(ModelBase):
     def __init__(self,
         word_id_size,
         embedding_size=128,
+        train_embedding=True,
         lstm_hidden_size=128,
         lstm_layer_num=1,
         output_hidden_size=1024,
-        regularizer_gamma=0.0,
+        regularizer_gamma=1e-3,
         attention=False,
         attention_size=256,
         ):
@@ -142,6 +143,7 @@ class BiLSTMModel(ModelBase):
         """
         self._word_id_size = word_id_size
         self._embedding_size = embedding_size
+        self._train_embedding = train_embedding
         self._lstm_hidden_size = lstm_hidden_size
         self._lstm_layer_num = lstm_layer_num
         self._output_hidden_size = output_hidden_size
@@ -150,6 +152,20 @@ class BiLSTMModel(ModelBase):
         self._attention_size = attention_size
 
         super(BiLSTMModel, self).__init__()
+
+    def init_session(self, session, params):
+        """Initialize session for training
+        Args:
+            session(tf.Session): The tensorflow session
+            params(Params): The parameters
+        Returns:
+            bool: Succeed or not
+        """
+        if not super(BiLSTMModel, self).init_session(session, params):
+            return False
+
+        if hasattr(params, "embedding") and params.embedding is not None:
+            session.run(self._assign_embedding_op, {self._embedding_placholder: params.embedding})
 
     def init_train_epoch(self, session, feeder, params):
         """Initialize training for the epoch
@@ -202,9 +218,11 @@ class BiLSTMModel(ModelBase):
                 [self._word_id_size, self._embedding_size],
                 dtype=tf.float32,
                 initializer=tf.truncated_normal_initializer(stddev=1e-1),
-                regularizer=regularizer,
+                trainable=self._train_embedding,
                 )
             embedded_inp = tf.nn.embedding_lookup(embedding_w, inp) # Shape: [batch size, max length, embedding size]
+            self._embedding_placholder = tf.placeholder(tf.float32, shape=[self._word_id_size, self._embedding_size])
+            self._assign_embedding_op = tf.assign(embedding_w, self._embedding_placholder)
 
         with tf.variable_scope("lstm"):
             # Bi-LSTM
@@ -228,7 +246,7 @@ class BiLSTMModel(ModelBase):
             lstm_output = tf.cond(self.is_training, lambda: tf.nn.dropout(lstm_output, 0.8), lambda: lstm_output)
 
         if self._attention:
-            with tf.variable_scope("attention"):
+            with tf.variable_scope("attention", initializer=tf.truncated_normal_initializer(stddev=1e-1), regularizer=regularizer):
                 # Sequence to vector by self attention
                 w = tf.get_variable("W", shape=[1, self._lstm_hidden_size*2, self._attention_size*3], dtype=tf.float32)
                 conv_out = tf.nn.conv1d(lstm_output, w, stride=1, padding="VALID") # Shape = [batch size, max_length, attention_size * 3]

@@ -76,7 +76,7 @@ class TextDictionary(object):
         if fit and min_id_count:
             raise ValueError("Cannot set fit and min_id_count at the same time")
 
-        words = self._sentence_to_words(s)
+        words = self.sentence_to_words(s)
         word_ids = []
         for word in words:
             _id = self.lookup_word_id(word, min_id_count)
@@ -118,7 +118,7 @@ class TextDictionary(object):
         self._word_to_ids = word_to_ids
         self._id_counter = id_counter
 
-    def _sentence_to_words(self, s):
+    def sentence_to_words(self, s):
         """Convert sentence to words
         """
         if self._use_jieba:

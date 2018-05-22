@@ -59,3 +59,41 @@ class ExampleBuilder(object):
             return values[:length]
         else:
             return values + [pad_value]*(length - len(values))
+
+
+class Word2VecExampleBuilder(object):
+    """The word2vec example builder
+    """
+    def __init__(self, text_dict, output_path, must_have_label=False):
+        """Create a new ExampleBuilder
+        """
+        self._text_dict = text_dict
+        self._output_path = output_path
+        self._must_have_label = must_have_label
+        self._writer = tf.python_io.TFRecordWriter(output_path)
+
+    def build_single_example(self, word, label):
+        """Build single example
+        """
+        example = tf.train.Example()
+        example.features.feature["word"].int64_list.value.append(self._text_dict.to_id(word, min_id_count=2)[0]) # pylint: disable=no-member
+        example.features.feature["label"].int64_list.value.append(self._text_dict.to_id(label, min_id_count=2)[0]) # pylint: disable=no-member
+
+        return example
+
+    def write(self, word, label):
+        """Write
+        """
+        if self._must_have_label and label is None:
+            raise ValueError("Lack of label field")
+
+        if label is None:
+            label = 0
+
+        example = self.build_single_example(word, label)
+        self._writer.write(example.SerializeToString())
+
+    def close(self):
+        """Close
+        """
+        self._writer.close()
