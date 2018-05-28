@@ -28,14 +28,16 @@ class TextDictionary(object):
             * 0 Default
             * 1 Unknown
             * 2 Numbers
+            * 3 <EOS>
             * ...
             * 10 <word>
 
     """
-    ID_Default = 0
-    ID_Unknown = 1
-    ID_Numbers = 2
-    ID_WordStart = 10
+    ID_Default  = 0
+    ID_Unknown  = 1
+    ID_Numbers  = 2
+    ID_EOS      = 3
+    ID_WordStart= 10
 
     Regex_Number = re.compile(r"^\d+$", re.UNICODE)
 
@@ -70,7 +72,7 @@ class TextDictionary(object):
         """
         self.to_id(s, fit=True, count=True)
 
-    def to_id(self, s, fit=False, count=False, merge_continguous_nums=True, min_id_count=0):
+    def to_id(self, s, fit=False, count=False, merge_continguous_nums=True, min_id_count=0, append_eos=True):
         """Convert sentence to ids
         """
         if fit and min_id_count:
@@ -93,6 +95,9 @@ class TextDictionary(object):
             if count:
                 self._id_counter[_id] += 1
             word_ids.append(_id)
+
+        if append_eos:
+            word_ids.append(self.ID_EOS)
 
         return word_ids
 

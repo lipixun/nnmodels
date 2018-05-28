@@ -11,6 +11,9 @@
 
 """
 
+import re
+import math
+
 import tensorflow as tf
 
 import tftrainer
@@ -18,6 +21,8 @@ import tftrainer
 from text import TextDictionary
 from dataset import Word2VecDataset
 from example import Word2VecExampleBuilder
+
+SentenceSplitRegex = re.compile(ur"[。！？；]", re.UNICODE)
 
 class Word2Vec(object):
     """The word2vec
@@ -47,8 +52,28 @@ class Word2Vec(object):
     def load_file(self, filename):
         """Load file
         """
+        with open(filename, "r") as fd:
+            skip_next = False
+            for content in fd:
+                content = content.strip()
+                if not content:
+                    continue
+                if skip_next:
+                    skip_next = False
+                    continue
+                # Check header
+                if content.startswith("<doc "):
+                    skip_next = True
+                    continue
+                elif content.startswith("</doc>"):
+                    continue
+                # Split and return
+                for sentence in SentenceSplitRegex.split(content):
+                    sentence = sentence.strip()
+                    if sentence:
+                        yield sentence
 
-    def preprocess(self, input_path, output_path, dict_path, no_fit=False):
+    def preprocess(self, input_path, output_path, dict_path, no_fit=False, only_first_n=0):
         """Preprocess
         """
         text_dict = TextDictionary(use_jieba=self._use_jieba)
@@ -58,16 +83,24 @@ class Word2Vec(object):
             text_dict.load(dict_path)
         else:
             # Build the dictionary
+            n = 0
             for input_file in tftrainer.path.findfiles(input_path):
                 for s in self.load_file(input_file):
+                    n += 1
+                    if only_first_n > 0 and n > only_first_n:
+                        break
                     text_dict.fit(s)
 
             text_dict.save(dict_path)
 
         # Build the tensorflow example file
+        n = 0
         for input_file, output_file in tftrainer.path.get_input_output_pair(input_path, output_path):
             example_builder = Word2VecExampleBuilder(text_dict, output_file + ".tfrecord", must_have_label=not no_fit)
             for s in self.load_file(input_file):
+                n += 1
+                if only_first_n > 0 and n > only_first_n:
+                    break
                 words = text_dict.sentence_to_words(s)
                 skip_gram_pairs = self.gen_skipgram_pairs(words)
                 for context_words, target in skip_gram_pairs:
@@ -143,22 +176,21 @@ class Word2VecModel(tftrainer.Model):
 
         # Embedding
         with tf.variable_scope("embedding"):
-            self._embedding_w = tf.get_variable("W", shape=[self._id_size, self._embedding_size], dtype=tf.float32)
+            self._embedding_w = tf.get_variable("W", shape=[self._id_size, self._embedding_size], dtype=tf.float32, initializer=tf.random_uniform_initializer(-1.0, 1.0))
             embedded_words = tf.nn.embedding_lookup(self._embedding_w, self._word)
 
         # Output layer
-        with tf.variable_scope("output", initializer=tf.truncated_normal_initializer(stddev=1e-1)):
-            w = tf.get_variable("W", shape=[self._id_size, self._embedding_size])
-            b = tf.get_variable("b", shape=[self._id_size], initializer=tf.zeros_initializer()),
+        with tf.variable_scope("output"):
+            w = tf.get_variable("W", shape=[self._id_size, self._embedding_size], initializer=tf.truncated_normal_initializer(stddev=1.0 / math.sqrt(self._embedding_size)))
+            b = tf.get_variable("b", shape=[self._id_size], initializer=tf.zeros_initializer())
             self._loss = tf.nn.nce_loss(
                 weights=w,
                 biases=b,
                 labels=tf.reshape(self._label, shape=[-1, 1]),
                 inputs=embedded_words,
                 num_sampled=self._sample_size,
-                num_classes=self._id_size,
-                num_true=1,
-            )
+                num_classes=self._id_size)
+            self._loss = tf.reduce_mean(self._loss)
 
         # Optimizer
         with tf.variable_scope("optimize"):
