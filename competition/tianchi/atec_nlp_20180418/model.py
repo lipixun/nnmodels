@@ -167,6 +167,8 @@ class BiLSTMModel(ModelBase):
         if hasattr(params, "embedding") and params.embedding is not None:
             session.run(self._assign_embedding_op, {self._embedding_placholder: params.embedding})
 
+        return True
+
     def init_train_epoch(self, session, feeder, params):
         """Initialize training for the epoch
         Args:
