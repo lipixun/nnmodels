@@ -27,7 +27,7 @@ SentenceSplitRegex = re.compile(ur"[。！？；]", re.UNICODE)
 class Word2Vec(object):
     """The word2vec
     """
-    def __init__(self, skip_window=5, use_jieba=False):
+    def __init__(self, skip_window=3, use_jieba=False):
         """Create a new Word2Vec
         """
         self._skip_window = skip_window
