@@ -11,6 +11,7 @@
 
 """
 
+import six
 import re
 import math
 
@@ -22,7 +23,7 @@ from text import TextDictionary
 from dataset import Word2VecDataset
 from example import Word2VecExampleBuilder
 
-SentenceSplitRegex = re.compile(ur"[。！？；]", re.UNICODE)
+SentenceSplitRegex = re.compile(r"[。！？；]", re.UNICODE)
 
 class Word2Vec(object):
     """The word2vec
@@ -52,7 +53,7 @@ class Word2Vec(object):
     def load_file(self, filename):
         """Load file
         """
-        with open(filename, "r") as fd:
+        with open(filename, "r", encoding="utf8") as fd:
             skip_next = False
             for content in fd:
                 content = content.strip()
@@ -73,7 +74,7 @@ class Word2Vec(object):
                     if sentence:
                         yield sentence
 
-    def preprocess(self, input_path, output_path, dict_path, no_fit=False, only_first_n=0):
+    def preprocess(self, input_path, output_path, dict_path, only_fit=False, no_fit=False, only_first_n=0):
         """Preprocess
         """
         text_dict = TextDictionary(use_jieba=self._use_jieba)
@@ -91,7 +92,11 @@ class Word2Vec(object):
                         break
                     text_dict.fit(s)
 
+            text_dict = text_dict.subset_by_word_count(50)
             text_dict.save(dict_path)
+
+        if only_fit:
+            return
 
         # Build the tensorflow example file
         n = 0
@@ -168,8 +173,8 @@ class Word2VecModel(tftrainer.Model):
         with tf.variable_scope("input"):
             self._inputfile = tf.placeholder(tf.string, shape=[None])
             self._dataset = Word2VecDataset(tf.data.TFRecordDataset(self._inputfile),
-                prefetch_size=51200,
-                batch_size=5120,
+                prefetch_size=512000,
+                batch_size=20480,
                 shuffle_size=51200,
                 )
             self._word, self._label = self._dataset.get_next()

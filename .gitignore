@@ -117,5 +117,7 @@ ENV/
 *.tgz
 *.tar.gz
 *.zip
+*.bak
+*.nparray
 outputs/
 scores

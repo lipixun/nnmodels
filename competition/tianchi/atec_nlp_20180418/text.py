@@ -10,6 +10,7 @@
 """
 
 import re
+import six
 
 from collections import Counter
 
@@ -41,10 +42,10 @@ class TextDictionary(object):
 
     Regex_Number = re.compile(r"^\d+$", re.UNICODE)
 
-    def __init__(self, word_mapping=None, id_counter=None,  normalize_nums=True, use_jieba=False):
+    def __init__(self, word_to_ids=None, id_counter=None,  normalize_nums=True, use_jieba=False):
         """Create a new TextDictionary
         """
-        self._word_to_ids = word_mapping or {}
+        self._word_to_ids = word_to_ids or {}
         self._id_counter = id_counter or Counter()
         self._normalize_nums = normalize_nums
         self._use_jieba = use_jieba
@@ -92,7 +93,9 @@ class TextDictionary(object):
                     _id = self.ID_Unknown
             if merge_continguous_nums and _id == self.ID_Numbers and word_ids and word_ids[-1] == self.ID_Numbers:
                 continue
-            if count:
+            if _id == self.ID_Unknown and word_ids and word_ids[-1] == self.ID_Unknown:
+                continue
+            if count and _id >= self.ID_WordStart:
                 self._id_counter[_id] += 1
             word_ids.append(_id)
 
@@ -130,3 +133,24 @@ class TextDictionary(object):
             return [word.strip() for word in jieba.cut(s) if word.strip()]
         else:
             return list(s)
+
+    def subset_by_word_count(self, min_count):
+        """Create a subset of this dictionary by the min count of word
+        NOTE:
+            This will remap the word index
+        """
+        word_to_ids = {}
+        id_counter = Counter()
+        # Build a id to word map
+        id_to_word = {}
+        for word, word_id in six.iteritems(self._word_to_ids):
+            id_to_word[word_id] = word
+        # Compute the subset and re-assign the ids
+        for word_id, count in self._id_counter.most_common():
+            if count < min_count:
+                break
+            word = id_to_word[word_id]
+            word_new_id = len(word_to_ids) + self.ID_WordStart
+            word_to_ids[word] = word_new_id
+            id_counter[word_new_id] = count
+        return TextDictionary(word_to_ids, id_counter, self._normalize_nums, self._use_jieba)

@@ -76,8 +76,8 @@ class Word2VecExampleBuilder(object):
         """Build single example
         """
         example = tf.train.Example()
-        example.features.feature["word"].int64_list.value.append(self._text_dict.to_id(word, min_id_count=2)[0]) # pylint: disable=no-member
-        example.features.feature["label"].int64_list.value.append(self._text_dict.to_id(label, min_id_count=2)[0]) # pylint: disable=no-member
+        example.features.feature["word"].int64_list.value.append(self._text_dict.to_id(word, min_id_count=50)[0]) # pylint: disable=no-member
+        example.features.feature["label"].int64_list.value.append(self._text_dict.to_id(label, min_id_count=50)[0]) # pylint: disable=no-member
 
         return example
 

@@ -20,7 +20,7 @@ import tensorflow as tf
 import tftrainer
 from tftrainer import Model, TrainBatchResult, EvaluateBatchResult, PredictBatchResult
 
-from dataset import Dataset
+from dataset import Dataset, PaddingSize
 
 class ModelBase(Model):
     """The model base
@@ -212,6 +212,7 @@ class BiLSTMModel(ModelBase):
             # Concat s1 and s2, and reshape
             inp = tf.concat([self._input_s1, self._input_s2], axis=1)
             inp = tf.reshape(inp, [-1, int(inp.shape[1].value/2)])
+            self._inp = inp
 
         with tf.variable_scope("embedding"):
             # Embedding
@@ -250,10 +251,9 @@ class BiLSTMModel(ModelBase):
         if self._attention:
             with tf.variable_scope("attention", initializer=tf.truncated_normal_initializer(stddev=1e-1), regularizer=regularizer):
                 # Sequence to vector by self attention
-                w = tf.get_variable("W", shape=[1, self._lstm_hidden_size*2, self._attention_size*3], dtype=tf.float32)
-                conv_out = tf.nn.conv1d(lstm_output, w, stride=1, padding="VALID") # Shape = [batch size, max_length, attention_size * 3]
+                w = tf.get_variable("W", shape=[self._lstm_hidden_size*2, self._attention_size*3], dtype=tf.float32)
                 # Split into q k v
-                q, k, v = tf.split(conv_out, 3, axis=2) # Shape = [batch size, max_length, attention_size] for each tensor
+                q, k, v = tf.split(tf.reshape(tf.matmul(tf.reshape(lstm_output, [-1, self._lstm_hidden_size*2]), w), [-1, PaddingSize, self._attention_size*3]), 3, axis=2) # Shape = [batch size, max_length, attention_size] for each tensor
                 # Dot product attention
                 attention = tf.nn.softmax(tf.matmul(q, k, transpose_b=True) / math.sqrt(self._attention_size)) # Shape = [batch size, max_length, max_length]
                 seq_vectors = tf.reduce_sum(tf.matmul(attention, v), axis=1)  # Shape = [batch size, attention_size]

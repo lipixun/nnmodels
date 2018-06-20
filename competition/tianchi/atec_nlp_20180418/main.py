@@ -11,6 +11,7 @@
 
 from __future__ import print_function
 
+import os
 import six
 import sys
 
@@ -29,6 +30,8 @@ from preproc import Preprocessor
 from word2vec import Word2Vec, Word2VecModel
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(name)s - %(message)s", level=logging.INFO)
+
+#os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "cpp"
 
 def preproc(input_path, output_path, dict_path, use_jieba, no_fit):
     """Preprocess
@@ -60,7 +63,7 @@ def train(name, attention, embedding_file, workpath, dict_file, train_files, eva
         with open(embedding_file, "rb") as fd:
             embedding = pickle.load(fd)
 
-    model = BiLSTMModel(text_dict.id_size, attention=attention)
+    model = BiLSTMModel(text_dict.id_size, attention=attention, train_embedding=embedding is None, lstm_layer_num=3)
     trainer = tftrainer.Trainer(model)
     trainer.train(
         name,
@@ -95,11 +98,11 @@ def predict(name, attention, workpath, dict_file, input_files, with_score):
             else:
                 print("%s\t%d" % (line_no, 1 if score >= 0.5 else 0))
 
-def preproc_word2vec(input_path, output_path, dict_path, skip_window, use_jieba, no_fit, first_n):
+def preproc_word2vec(input_path, output_path, dict_path, skip_window, use_jieba, only_fit, no_fit, first_n):
     """Preprocess
     """
     w2v = Word2Vec(skip_window, use_jieba)
-    w2v.preprocess(input_path, output_path, dict_path, no_fit, first_n)
+    w2v.preprocess(input_path, output_path, dict_path, only_fit, no_fit, first_n)
 
 def train_word2vec(name, workpath, dict_file, input_files, output_file, epoch):
     """Train the model
@@ -170,8 +173,9 @@ if __name__ == "__main__":
         preproc_word2vec_parser.add_argument("-d", "--dict-file", dest="dict_file", default="dict.data", help="The dictionary filename")
         preproc_word2vec_parser.add_argument("--skip-window", dest="skip_window", type=int, default=5, help="The skip window")
         preproc_word2vec_parser.add_argument("--jieba", dest="use_jieba", action="store_true", default=False, help="Use jieba")
+        preproc_word2vec_parser.add_argument("--only-fit", dest="only_fit", action="store_true", default=False, help="Only fit dictionary")
         preproc_word2vec_parser.add_argument("--no-fit", dest="no_fit", action="store_true", default=False, help="Do not fit dictionary")
-        preproc_word2vec_parser.add_argument("--first-n", dest="first_n", type=int, help="Only preprocess top n sentences")
+        preproc_word2vec_parser.add_argument("--first-n", dest="first_n", type=int, default=0, help="Only preprocess top n sentences")
 
         train_word2vec_parser = sub_parsers.add_parser("train-word2vec", help="Train word2vec")
         train_word2vec_parser.add_argument("-n", "--name", dest="name", required=True, help="Model name")
@@ -195,7 +199,9 @@ if __name__ == "__main__":
         elif args.action == "predict":
             predict(args.name, args.attention, args.workpath, args.dict_file, args.files, args.with_score)
         elif args.action == "preproc-word2vec":
-            preproc_word2vec(args.input, args.output, args.dict_file, args.skip_window, args.use_jieba, args.no_fit, args.first_n)
+            if args.only_fit and args.no_fit:
+                raise ValueError("Cannot specify both only-fit and no-fit")
+            preproc_word2vec(args.input, args.output, args.dict_file, args.skip_window, args.use_jieba, args.only_fit, args.no_fit, args.first_n)
         elif args.action == "train-word2vec":
             train_word2vec(args.name, args.workpath, args.dict_file, args.input_files, args.output_file, args.epoch)
         else:
